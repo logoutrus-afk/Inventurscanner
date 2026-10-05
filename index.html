@@ -241,9 +241,6 @@
     return imageData;
   }
 
-  // ============================================================
-  //  Предобработка
-  // ============================================================
   function preprocessImage(file, opts = {}) {
     const upscale   = opts.upscale   || 2;
     const cropFrom  = opts.cropFrom  ?? 0;
@@ -328,6 +325,9 @@
   async function runOcr(file) {
     if (!file) return;
 
+    // Запоминаем текущее имя (если оно уже введено — не перетираем)
+    const savedName = $('name').value.trim();
+
     $('preview').src = URL.createObjectURL(file);
     $('preview').classList.add('active');
     $('progress').classList.add('active');
@@ -337,21 +337,18 @@
     try {
       const variants = [];
 
-      // 1) full-gray
       $('progress').textContent = 'Проход 1/4…';
       const v1 = await preprocessImage(file, { upscale:2, contrast:1.5, mode:'gray' });
       variants.push({ name:'full-gray', text: await ocrImage(v1, 6, m => {
         if (m.status==='recognizing text') $('progress').textContent = 'Проход 1/4… '+Math.round((m.progress||0)*100)+'%';
       })});
 
-      // 2) bold-full
       $('progress').textContent = 'Проход 2/4 (жирный)…';
       const v2 = await preprocessImage(file, { upscale:2, contrast:1.7, bold:2, mode:'otsu' });
       variants.push({ name:'bold-full', text: await ocrImage(v2, 6, m => {
         if (m.status==='recognizing text') $('progress').textContent = 'Проход 2/4… '+Math.round((m.progress||0)*100)+'%';
       })});
 
-      // 3) topDigits — только цифры вверху
       $('progress').textContent = 'Проход 3/4 (цифры вверху)…';
       const v3blob = await preprocessImage(file, { upscale:5, contrast:1.6, cropFrom:0, cropTo:0.15, mode:'gray' });
       const v3text = await ocrImage(v3blob, 7, m => {
@@ -359,7 +356,6 @@
       }, { tessedit_char_whitelist: '0123456789 ' });
       variants.push({ name:'topDigits', text: v3text });
 
-      // 4) nameStrip — Name
       $('progress').textContent = 'Проход 4/4 (Name)…';
       const v4blob = await preprocessImage(file, { upscale:3, contrast:1.7, bold:1, cropFrom:0.1, cropTo:0.4, mode:'otsu' });
       const v4text = await ocrImage(v4blob, 6, m => {
@@ -375,50 +371,44 @@
 
       const filled = { material:false, name:false, charge:false, gewicht:false };
 
-      // ===== Materialnummer =====
-      // Сначала dedicated-проход topDigits
+      // ===== MATERIALNUMMER =====
       const numFromTop = extract6Digits(v3text);
       if (numFromTop) {
         $('material').value = numFromTop;
         filled.material = true;
-        console.log('Material (topDigits):', numFromTop);
       }
-      // Потом обычный парсер
       if (!filled.material) {
         for (const v of variants) {
           const m = extractMaterial(v.text);
-          if (m) { $('material').value = m; filled.material = true; console.log('Material ('+v.name+'):', m); break; }
+          if (m) { $('material').value = m; filled.material = true; break; }
         }
       }
 
-      // ===== Name =====
-      if (!filled.name) {
+      // ===== NAME =====
+      // Если имя уже введено вручную — НЕ перетираем его
+      if (savedName) {
+        filled.name = true;
+      } else {
+        // Ищем сырую строку с ®
         for (const v of variants) {
           const lines = v.text.split('\n').map(s=>s.trim()).filter(Boolean);
           for (const ln of lines) {
             if (/[®©Ⓡ]/.test(ln) && ln.replace(/[®©Ⓡ]/g,'').trim().length > 4) {
-              let nm = ln.replace(/[®©Ⓡ]/g,'').replace(/\s+/g,' ').trim();
-              nm = nm.replace(/^[^A-Z]+/, '');
-              nm = nm.replace(/^[FLA]?ASTOSIL/i, 'ELASTOSIL');
-              nm = nm.replace(/M\s*4601\s*[Aa]$/i, 'M 4601 A');
-              nm = nm.toUpperCase();
-              if (nm.length >= 3) { $('name').value = nm; filled.name = true; break; }
+              const cleaned = cleanName(ln);
+              if (cleaned) { $('name').value = cleaned; filled.name = true; break; }
             }
           }
           if (filled.name) break;
         }
+        // Fallback — ищем бренд
         if (!filled.name) {
-          const brands = /\b(ELASTOSIL|WACKER|SILICONE|TEROSON|LOCTITE|SIKA|DOW|HENKEL|MOMENTIVE)\b/i;
+          const brands = /(ELASTOSIL|FLASTOSIL|LASTOSIL|WACKER|SILICONE|TEROSON|LOCTITE|SIKA)/i;
           for (const v of variants) {
             const lines = v.text.split('\n').map(s=>s.trim()).filter(Boolean);
             for (const ln of lines) {
               if (brands.test(ln)) {
-                let nm = ln.replace(/[®©Ⓡ"']/g,'').replace(/\s+/g,' ').trim();
-                nm = nm.replace(/^[^A-Z]+/, '');
-                nm = nm.replace(/^[FLA]?ASTOSIL/i, 'ELASTOSIL');
-                nm = nm.replace(/M\s*4601\s*[Aa]$/i, 'M 4601 A');
-                nm = nm.toUpperCase();
-                if (nm.length >= 3) { $('name').value = nm; filled.name = true; break; }
+                const cleaned = cleanName(ln);
+                if (cleaned) { $('name').value = cleaned; filled.name = true; break; }
               }
             }
             if (filled.name) break;
@@ -426,13 +416,13 @@
         }
       }
 
-      // ===== Charge =====
+      // ===== CHARGE =====
       if (!filled.charge) {
         const charge = extractCharge(variants.map(v=>v.text).join('\n'));
         if (charge) { $('charge').value = charge; filled.charge = true; }
       }
 
-      // ===== Gewicht =====
+      // ===== GEWICHT =====
       if (!filled.gewicht) {
         const gew = extractGewicht(variants.map(v=>v.text).join('\n'));
         if (gew) { $('gewicht').value = gew; filled.gewicht = true; }
@@ -465,7 +455,7 @@
   });
 
   // ============================================================
-  //  ИЗВЛЕЧЕНИЕ ПОЛЕЙ
+  //  Извлечение полей
   // ============================================================
   function extract6Digits(text) {
     if (!text) return '';
@@ -488,9 +478,7 @@
           const i = packIdx + dir * off;
           if (i < 0 || i >= lines.length) continue;
           const matches = lines[i].match(/\b\d{6}\b/g);
-          if (matches) {
-            for (const m of matches) candidates.push({ value: m, dist: off });
-          }
+          if (matches) for (const m of matches) candidates.push({ value: m, dist: off });
         }
       }
       if (candidates.length) {
@@ -508,6 +496,48 @@
     return m ? m[0] : '';
   }
 
+  // ===== ОЧИСТКА NAME =====
+  function cleanName(raw) {
+    if (!raw) return '';
+
+    let s = raw
+      .replace(/[®©Ⓡ"']/g, '')          // убираем символы
+      .replace(/\s+/g, ' ')              // множественные пробелы → один
+      .trim();
+
+    // Убираем мусор в начале: короткие куски типа "SS ", "a 4 ", "| " и т.д.
+    // Ищем первую заглавную букву и начинаем с неё
+    // Особенно — ищем узнаваемые бренды
+    const brandMatch = s.match(/(ELASTOSIL|FLASTOSIL|LASTOSIL|WACKER|SILICONE|TEROSON|LOCTITE|SIKA|DOW|HENKEL|MOMENTIVE)/i);
+    if (brandMatch) {
+      s = s.substring(brandMatch.index);
+    } else {
+      // Убираем всё до первой заглавной буквы (A-Z), если перед ней только мусор
+      s = s.replace(/^[^A-ZА-Я]*/, '');
+    }
+
+    // Убираем мусор в конце (после типа "M 4601 A" или после цифры)
+    // Например "M 46 V |" → "M 46"
+    // Ищем "M 4601" / "M 4601 A" / "M 4601A"
+    const modelMatch = s.match(/^(.*?M\s*\d{2,4}\s*[A-ZА-Я]?)/);
+    if (modelMatch && modelMatch[1].length >= 6) {
+      s = modelMatch[1].trim();
+    } else {
+      // Общая очистка конца: убираем одиночные символы и разделители
+      s = s.replace(/[\s\|]+[A-ZА-Я]?\s*\|?\s*$/g, '').trim();
+    }
+
+    // Автокоррекции
+    s = s.replace(/F?LA?STOSIL/gi, 'ELASTOSIL');
+    s = s.replace(/M\s*46\s*0?1\s*[Aa]?/i, 'M 4601 A');
+    s = s.replace(/\s+/g, ' ').trim();
+    s = s.toUpperCase();
+
+    // Финальный отсев — если осталось меньше 4 символов, не годится
+    if (s.length < 4) return '';
+    return s;
+  }
+
   function extractCharge(text) {
     const cleaned = text
       .replace(/\$/g, 'S')
@@ -519,10 +549,10 @@
 
     const ctx = cleaned.match(/CHARGEN?[\s\S]{0,40}?S[RB]?\s?(\d{6,8})/i);
     if (ctx) return 'SR' + ctx[1];
-
     return '';
   }
 
+  // ===== GEWICHT с агрессивной автокоррекцией =====
   function extractGewicht(text) {
     const up = text.toUpperCase();
     let g = '';
@@ -535,12 +565,20 @@
       const g2 = up.match(/(\d+[.,]\d{2,3})\s*KG/);
       if (g2) g = g2[1].replace(',', '.');
     }
-
     if (!g) return '';
 
-    // Автокоррекция типичных OCR-ошибок
-    g = g.replace(/(\d)00[89]$/, '$1000');
-    g = g.replace(/(\d)009$/, '$1000');
+    // АГРЕССИВНАЯ автокоррекция: если в дробной части "00X" —
+    // где X может быть 8, 9, 6, 5 — меняем на 0.
+    // 300.008 → 300.000
+    // 300.009 → 300.000
+    // 300.005 → 300.000
+    // 300.006 → 300.000
+    g = g.replace(/^(\d+)\.(00)[5689]$/, '$1.$2' + '0');
+
+    // Также — если вторая цифра после запятой 0, третья 8/9 — то это ошибка
+    // 30.008 → нет, это не наш случай
+    // 300.080 → 300.000 (если 080, то тоже похоже на ошибку)
+    g = g.replace(/^(\d+)\.(0)([89])(\d)$/, '$1.$2' + '00');
 
     return g;
   }
