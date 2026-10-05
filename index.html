@@ -325,7 +325,6 @@
   async function runOcr(file) {
     if (!file) return;
 
-    // Запоминаем текущее имя (если оно уже введено — не перетираем)
     const savedName = $('name').value.trim();
 
     $('preview').src = URL.createObjectURL(file);
@@ -385,11 +384,10 @@
       }
 
       // ===== NAME =====
-      // Если имя уже введено вручную — НЕ перетираем его
       if (savedName) {
+        // Имя уже введено — не перетираем
         filled.name = true;
       } else {
-        // Ищем сырую строку с ®
         for (const v of variants) {
           const lines = v.text.split('\n').map(s=>s.trim()).filter(Boolean);
           for (const ln of lines) {
@@ -400,7 +398,6 @@
           }
           if (filled.name) break;
         }
-        // Fallback — ищем бренд
         if (!filled.name) {
           const brands = /(ELASTOSIL|FLASTOSIL|LASTOSIL|WACKER|SILICONE|TEROSON|LOCTITE|SIKA)/i;
           for (const v of variants) {
@@ -455,7 +452,7 @@
   });
 
   // ============================================================
-  //  Извлечение полей
+  //  ИЗВЛЕЧЕНИЕ ПОЛЕЙ
   // ============================================================
   function extract6Digits(text) {
     if (!text) return '';
@@ -496,90 +493,81 @@
     return m ? m[0] : '';
   }
 
-  // ===== ОЧИСТКА NAME =====
+  // ===== ОЧИСТКА NAME со справочником =====
   function cleanName(raw) {
     if (!raw) return '';
 
     let s = raw
-      .replace(/[®©Ⓡ"']/g, '')          // убираем символы
-      .replace(/\s+/g, ' ')              // множественные пробелы → один
+      .replace(/[®©Ⓡ"']/g, '')
+      .replace(/\s+/g, ' ')
       .trim();
 
-    // Убираем мусор в начале: короткие куски типа "SS ", "a 4 ", "| " и т.д.
-    // Ищем первую заглавную букву и начинаем с неё
-    // Особенно — ищем узнаваемые бренды
+    // Находим бренд и обрезаем всё до него
     const brandMatch = s.match(/(ELASTOSIL|FLASTOSIL|LASTOSIL|WACKER|SILICONE|TEROSON|LOCTITE|SIKA|DOW|HENKEL|MOMENTIVE)/i);
-    if (brandMatch) {
-      s = s.substring(brandMatch.index);
-    } else {
-      // Убираем всё до первой заглавной буквы (A-Z), если перед ней только мусор
-      s = s.replace(/^[^A-ZА-Я]*/, '');
-    }
+    if (brandMatch) s = s.substring(brandMatch.index);
+    else s = s.replace(/^[^A-ZА-Я]*/, '');
 
-    // Убираем мусор в конце (после типа "M 4601 A" или после цифры)
-    // Например "M 46 V |" → "M 46"
-    // Ищем "M 4601" / "M 4601 A" / "M 4601A"
+    // Обрезаем мусор после модели M xxxx
     const modelMatch = s.match(/^(.*?M\s*\d{2,4}\s*[A-ZА-Я]?)/);
-    if (modelMatch && modelMatch[1].length >= 6) {
-      s = modelMatch[1].trim();
-    } else {
-      // Общая очистка конца: убираем одиночные символы и разделители
-      s = s.replace(/[\s\|]+[A-ZА-Я]?\s*\|?\s*$/g, '').trim();
-    }
+    if (modelMatch && modelMatch[1].length >= 6) s = modelMatch[1].trim();
 
-    // Автокоррекции
-    s = s.replace(/F?LA?STOSIL/gi, 'ELASTOSIL');
-    s = s.replace(/M\s*46\s*0?1\s*[Aa]?/i, 'M 4601 A');
-    s = s.replace(/\s+/g, ' ').trim();
     s = s.toUpperCase();
 
-    // Финальный отсев — если осталось меньше 4 символов, не годится
+    // ===== СПРАВОЧНИК ИЗВЕСТНЫХ ПРОДУКТОВ =====
+    // Если OCR путает цифры/буквы — восстанавливаем каноничное название
+    const KNOWN = [
+      { pattern: /ELASTOSIL\s*M\s*46/i,   canonical: 'ELASTOSIL M 4601 A' },
+      { pattern: /ELASTOSIL\s*M\s*4601/i, canonical: 'ELASTOSIL M 4601 A' },
+      { pattern: /ELASTOSIL\s*M\s*4600/i, canonical: 'ELASTOSIL M 4600 A' },
+      { pattern: /ELASTOSIL\s*M\s*45/i,   canonical: 'ELASTOSIL M 4500 A' }
+    ];
+    for (const k of KNOWN) {
+      if (k.pattern.test(s)) return k.canonical;
+    }
+
     if (s.length < 4) return '';
     return s;
   }
 
+  // ===== CHARGE =====
   function extractCharge(text) {
-    const cleaned = text
-      .replace(/\$/g, 'S')
-      .replace(/[|!Il]/g, '1')
-      .replace(/O/g, '0');
-
-    let m = cleaned.match(/\bS[RB]\s?(\d{6,8})\b/);
+    const lines = text.split('\n');
+    for (const ln of lines) {
+      if (/CHARGEN/i.test(ln)) {
+        let s = ln.replace(/\$/g, 'S').replace(/[|!]/g, '1').replace(/O/g, '0');
+        const m = s.match(/(\d[\d\s]{4,8}\d)/);
+        if (m) {
+          let digits = m[1].replace(/\s/g, '');
+          if (digits.length >= 5 && digits.length <= 9) return 'SR' + digits;
+        }
+      }
+    }
+    const m = text.match(/S[RB]\s*(\d{6,8})/i);
     if (m) return 'SR' + m[1];
-
-    const ctx = cleaned.match(/CHARGEN?[\s\S]{0,40}?S[RB]?\s?(\d{6,8})/i);
-    if (ctx) return 'SR' + ctx[1];
     return '';
   }
 
-  // ===== GEWICHT с агрессивной автокоррекцией =====
+  // ===== GEWICHT с автокоррекцией 008/009 → 000 =====
   function extractGewicht(text) {
     const up = text.toUpperCase();
     let g = '';
 
-    const netto = up.match(/NETTO[^\d]{0,15}(\d+[.,]\d+)\s*(KG|G)?/);
+    const netto = up.match(/NETTO[^\d]{0,15}(\d+)[.,](\d+)\s*(KG|G)?/);
     if (netto) {
-      g = netto[1].replace(',', '.');
-      if (netto[2] === 'G') g = (parseFloat(g)/1000).toFixed(3);
+      let intPart = netto[1];
+      let decPart = netto[2];
+      // Автокоррекция: 008 / 009 / 005 / 006 → 000
+      if (/^00[5689]$/.test(decPart)) decPart = '000';
+      g = intPart + '.' + decPart;
+      if (netto[3] === 'G') g = (parseFloat(g)/1000).toFixed(3);
     } else {
-      const g2 = up.match(/(\d+[.,]\d{2,3})\s*KG/);
-      if (g2) g = g2[1].replace(',', '.');
+      const g2 = up.match(/(\d+)[.,](\d{2,3})\s*KG/);
+      if (g2) {
+        let dec = g2[2];
+        if (/^00[5689]$/.test(dec)) dec = '000';
+        g = g2[1] + '.' + dec;
+      }
     }
-    if (!g) return '';
-
-    // АГРЕССИВНАЯ автокоррекция: если в дробной части "00X" —
-    // где X может быть 8, 9, 6, 5 — меняем на 0.
-    // 300.008 → 300.000
-    // 300.009 → 300.000
-    // 300.005 → 300.000
-    // 300.006 → 300.000
-    g = g.replace(/^(\d+)\.(00)[5689]$/, '$1.$2' + '0');
-
-    // Также — если вторая цифра после запятой 0, третья 8/9 — то это ошибка
-    // 30.008 → нет, это не наш случай
-    // 300.080 → 300.000 (если 080, то тоже похоже на ошибку)
-    g = g.replace(/^(\d+)\.(0)([89])(\d)$/, '$1.$2' + '00');
-
     return g;
   }
 
