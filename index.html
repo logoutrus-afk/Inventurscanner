@@ -385,7 +385,6 @@
 
       // ===== NAME =====
       if (savedName) {
-        // Имя уже введено — не перетираем
         filled.name = true;
       } else {
         for (const v of variants) {
@@ -493,28 +492,39 @@
     return m ? m[0] : '';
   }
 
-  // ===== ОЧИСТКА NAME со справочником =====
+  // ===== ОЧИСТКА NAME =====
   function cleanName(raw) {
     if (!raw) return '';
 
     let s = raw
       .replace(/[®©Ⓡ"']/g, '')
       .replace(/\s+/g, ' ')
-      .trim();
+      .trim()
+      .toUpperCase();
 
-    // Находим бренд и обрезаем всё до него
-    const brandMatch = s.match(/(ELASTOSIL|FLASTOSIL|LASTOSIL|WACKER|SILICONE|TEROSON|LOCTITE|SIKA|DOW|HENKEL|MOMENTIVE)/i);
+    // ШАГ 1: обрезаем всё до бренда
+    const brandMatch = s.match(/(ELASTOSIL|FLASTOSIL|LASTOSIL|WACKER|SILICONE|TEROSON|LOCTITE|SIKA|DOW|HENKEL|MOMENTIVE)/);
     if (brandMatch) s = s.substring(brandMatch.index);
     else s = s.replace(/^[^A-ZА-Я]*/, '');
 
-    // Обрезаем мусор после модели M xxxx
-    const modelMatch = s.match(/^(.*?M\s*\d{2,4}\s*[A-ZА-Я]?)/);
-    if (modelMatch && modelMatch[1].length >= 6) s = modelMatch[1].trim();
+    // ШАГ 2: НОРМАЛИЗАЦИЯ БРЕНДА (ключевой фикс!)
+    // FLASTOSIL, LASTOSIL, ELASTOSI и т.п. → ELASTOSIL
+    s = s.replace(/^F?LA?STOSIL/, 'ELASTOSIL');
+    s = s.replace(/^ELASTOSI(?!L)/, 'ELASTOSIL');
+    // Если бренд вообще не распознан, но начинается на "ASTOSIL" — добавим E
+    s = s.replace(/^ASTOSIL/, 'ELASTOSIL');
 
-    s = s.toUpperCase();
+    // ШАГ 3: обрезаем мусор после модели
+    const modelMatch = s.match(/^(ELASTOSIL\s+M\s*\d{2,4}\s*[A-ZА-Я]?)/);
+    if (modelMatch) {
+      s = modelMatch[1].trim();
+    } else {
+      const m2 = s.match(/^(.*?M\s*\d{2,4}\s*[A-ZА-Я]?)/);
+      if (m2 && m2[1].length >= 6) s = m2[1].trim();
+    }
 
-    // ===== СПРАВОЧНИК ИЗВЕСТНЫХ ПРОДУКТОВ =====
-    // Если OCR путает цифры/буквы — восстанавливаем каноничное название
+    // ШАГ 4: СПРАВОЧНИК ИЗВЕСТНЫХ ПРОДУКТОВ
+    // Теперь s гарантированно начинается с ELASTOSIL
     const KNOWN = [
       { pattern: /ELASTOSIL\s*M\s*46/i,   canonical: 'ELASTOSIL M 4601 A' },
       { pattern: /ELASTOSIL\s*M\s*4601/i, canonical: 'ELASTOSIL M 4601 A' },
@@ -547,7 +557,7 @@
     return '';
   }
 
-  // ===== GEWICHT с автокоррекцией 008/009 → 000 =====
+  // ===== GEWICHT =====
   function extractGewicht(text) {
     const up = text.toUpperCase();
     let g = '';
@@ -556,7 +566,6 @@
     if (netto) {
       let intPart = netto[1];
       let decPart = netto[2];
-      // Автокоррекция: 008 / 009 / 005 / 006 → 000
       if (/^00[5689]$/.test(decPart)) decPart = '000';
       g = intPart + '.' + decPart;
       if (netto[3] === 'G') g = (parseFloat(g)/1000).toFixed(3);
