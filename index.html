@@ -7,124 +7,38 @@
 <title>Etiketten Scanner</title>
 <style>
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
-  body {
-    margin: 0;
-    font-family: -apple-system, system-ui, "Segoe UI", Roboto, sans-serif;
-    background: #f2f4f7;
-    color: #1a1a1a;
-    padding-bottom: 90px;
-  }
-  header {
-    background: #0d6efd;
-    color: #fff;
-    padding: 14px 16px;
-    font-size: 18px;
-    font-weight: 600;
-    position: sticky;
-    top: 0;
-    z-index: 10;
-    box-shadow: 0 2px 6px rgba(0,0,0,.15);
-  }
-  .container { padding: 14px; max-width: 640px; margin: 0 auto; }
-  .card {
-    background: #fff;
-    border-radius: 12px;
-    padding: 14px;
-    margin-bottom: 14px;
-    box-shadow: 0 1px 4px rgba(0,0,0,.06);
-  }
-  label {
-    display: block;
-    font-size: 13px;
-    color: #555;
-    margin-bottom: 4px;
-    font-weight: 500;
-  }
-  input[type="text"], input[type="number"] {
-    width: 100%;
-    padding: 12px;
-    font-size: 16px;
-    border: 1px solid #d5d9e0;
-    border-radius: 8px;
-    background: #fafbfc;
-    outline: none;
-    margin-bottom: 12px;
-  }
-  input:focus { border-color: #0d6efd; background: #fff; }
-  button {
-    width: 100%;
-    padding: 14px;
-    font-size: 16px;
-    font-weight: 600;
-    border: none;
-    border-radius: 10px;
-    cursor: pointer;
-    margin-bottom: 8px;
-    transition: opacity .15s;
-  }
-  button:active { opacity: .75; }
-  .btn-primary { background: #0d6efd; color: #fff; }
-  .btn-scan    { background: #198754; color: #fff; }
-  .btn-save    { background: #ffc107; color: #212529; }
-  .btn-export  { background: #6f42c1; color: #fff; }
-  .btn-clear   { background: #e9ecef; color: #495057; font-weight: 500; }
-  .btn-row { display: flex; gap: 8px; }
-  .btn-row button { margin-bottom: 0; }
-  .counter {
-    display: inline-block;
-    background: #e7f1ff;
-    color: #0d6efd;
-    padding: 3px 10px;
-    border-radius: 20px;
-    font-size: 13px;
-    font-weight: 600;
-  }
-  .record {
-    background: #fff;
-    border-radius: 10px;
-    padding: 10px 12px;
-    margin-bottom: 8px;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    font-size: 14px;
-    box-shadow: 0 1px 3px rgba(0,0,0,.05);
-    border-left: 4px solid #0d6efd;
-  }
-  .record b { color: #0d6efd; }
-  .record .del {
-    background: #dc3545;
-    color: #fff;
-    border: none;
-    width: 34px;
-    height: 34px;
-    border-radius: 50%;
-    font-size: 18px;
-    padding: 0;
-    margin: 0;
-    flex-shrink: 0;
-  }
-  #reader { width: 100%; border-radius: 12px; overflow: hidden; margin-bottom: 12px; display: none; }
-  #reader.active { display: block; }
-  .toast {
-    position: fixed;
-    bottom: 20px;
-    left: 50%;
-    transform: translateX(-50%);
-    background: #212529;
-    color: #fff;
-    padding: 12px 20px;
-    border-radius: 25px;
-    font-size: 14px;
-    opacity: 0;
-    pointer-events: none;
-    transition: opacity .3s;
-    z-index: 100;
-    max-width: 90%;
-    text-align: center;
-  }
-  .toast.show { opacity: 1; }
-  .empty { text-align: center; color: #999; padding: 20px; font-size: 14px; }
+  body { margin:0; font-family:-apple-system,system-ui,"Segoe UI",Roboto,sans-serif; background:#f2f4f7; color:#1a1a1a; padding-bottom:90px; }
+  header { background:#0d6efd; color:#fff; padding:14px 16px; font-size:18px; font-weight:600; position:sticky; top:0; z-index:10; box-shadow:0 2px 6px rgba(0,0,0,.15); }
+  .container { padding:14px; max-width:640px; margin:0 auto; }
+  .card { background:#fff; border-radius:12px; padding:14px; margin-bottom:14px; box-shadow:0 1px 4px rgba(0,0,0,.06); }
+  label { display:block; font-size:13px; color:#555; margin-bottom:4px; font-weight:500; }
+  input[type="text"], input[type="number"] { width:100%; padding:12px; font-size:16px; border:1px solid #d5d9e0; border-radius:8px; background:#fafbfc; outline:none; margin-bottom:12px; }
+  input:focus { border-color:#0d6efd; background:#fff; }
+  button { width:100%; padding:14px; font-size:16px; font-weight:600; border:none; border-radius:10px; cursor:pointer; margin-bottom:8px; transition:opacity .15s; }
+  button:active { opacity:.75; }
+  button:disabled { opacity:.5; cursor:wait; }
+  .btn-primary { background:#0d6efd; color:#fff; }
+  .btn-ocr    { background:#198754; color:#fff; }
+  .btn-scan   { background:#0d6efd; color:#fff; }
+  .btn-save   { background:#ffc107; color:#212529; }
+  .btn-export { background:#6f42c1; color:#fff; }
+  .btn-clear  { background:#e9ecef; color:#495057; font-weight:500; }
+  .btn-row { display:flex; gap:8px; }
+  .btn-row button { margin-bottom:0; }
+  .counter { display:inline-block; background:#e7f1ff; color:#0d6efd; padding:3px 10px; border-radius:20px; font-size:13px; font-weight:600; }
+  .record { background:#fff; border-radius:10px; padding:10px 12px; margin-bottom:8px; display:flex; justify-content:space-between; align-items:center; font-size:14px; box-shadow:0 1px 3px rgba(0,0,0,.05); border-left:4px solid #0d6efd; }
+  .record b { color:#0d6efd; }
+  .record .del { background:#dc3545; color:#fff; border:none; width:34px; height:34px; border-radius:50%; font-size:18px; padding:0; margin:0; flex-shrink:0; }
+  #reader { width:100%; border-radius:12px; overflow:hidden; margin-bottom:12px; display:none; }
+  #reader.active { display:block; }
+  #preview { width:100%; border-radius:12px; margin-bottom:12px; display:none; }
+  #preview.active { display:block; }
+  #progress { display:none; text-align:center; padding:10px; color:#0d6efd; font-size:14px; }
+  #progress.active { display:block; }
+  .toast { position:fixed; bottom:20px; left:50%; transform:translateX(-50%); background:#212529; color:#fff; padding:12px 20px; border-radius:25px; font-size:14px; opacity:0; pointer-events:none; transition:opacity .3s; z-index:100; max-width:90%; text-align:center; }
+  .toast.show { opacity:1; }
+  .empty { text-align:center; color:#999; padding:20px; font-size:14px; }
+  .hint { font-size:12px; color:#888; margin-top:-6px; margin-bottom:10px; }
 </style>
 </head>
 <body>
@@ -134,6 +48,13 @@
 <div class="container">
 
   <div class="card">
+    <button class="btn-ocr" id="btnOcr">📷 Распознать текст с этикетки</button>
+    <button class="btn-scan" id="btnScan">▦ Сканировать штрихкод (Charge)</button>
+
+    <div id="reader"></div>
+    <img id="preview" alt="">
+    <div id="progress">Распознаю текст… Подождите 5–15 сек.</div>
+
     <label>Materialnummer</label>
     <input type="text" id="material" inputmode="numeric" placeholder="z.B. 201486">
 
@@ -146,9 +67,6 @@
     <label>Gewicht (kg)</label>
     <input type="number" id="gewicht" step="0.001" placeholder="z.B. 300.000">
 
-    <div id="reader"></div>
-
-    <button class="btn-scan" id="btnScan">📷 Штрихкод сканировать</button>
     <button class="btn-save" id="btnSave">💾 Сохранить запись</button>
   </div>
 
@@ -158,7 +76,6 @@
       <span class="counter" id="counter">0</span>
     </div>
     <div id="list"></div>
-
     <div class="btn-row" style="margin-top:10px;">
       <button class="btn-export" id="btnExport">📤 CSV</button>
       <button class="btn-clear" id="btnClear">🗑 Очистить</button>
@@ -170,6 +87,7 @@
 <div class="toast" id="toast"></div>
 
 <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 <script>
 (function () {
   const $ = id => document.getElementById(id);
@@ -180,12 +98,10 @@
   let html5Qr = null;
   let scanning = false;
 
-  // Восстанавливаем последнее введённое имя
   $('name').value = localStorage.getItem(NAME_KEY) || '';
 
-  // -------- Toast --------
   let toastTimer;
-  function toast(msg, ms = 2000) {
+  function toast(msg, ms = 2500) {
     const t = $('toast');
     t.textContent = msg;
     t.classList.add('show');
@@ -193,12 +109,11 @@
     toastTimer = setTimeout(() => t.classList.remove('show'), ms);
   }
 
-  // -------- Рендер списка --------
   function render() {
     const list = $('list');
     $('counter').textContent = records.length;
-    if (records.length === 0) {
-      list.innerHTML = '<div class="empty">Пока пусто. Отсканируйте и сохраните первую запись.</div>';
+    if (!records.length) {
+      list.innerHTML = '<div class="empty">Пока пусто. Распознайте этикетку и сохраните запись.</div>';
       return;
     }
     list.innerHTML = records.map((r, i) => `
@@ -209,169 +124,201 @@
             Charge: ${esc(r.charge || '—')} · ${esc(r.gewicht || '—')} kg
           </div>
         </div>
-        <button class="del" data-i="${i}" aria-label="Удалить">×</button>
+        <button class="del" data-i="${i}">×</button>
       </div>
     `).join('');
   }
+  function esc(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 
-  function esc(s) {
-    return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-  }
-
-  // -------- Сохранить запись --------
+  // ---------- Сохранение ----------
   $('btnSave').addEventListener('click', () => {
     const material = $('material').value.trim();
     const name     = $('name').value.trim();
     const charge   = $('charge').value.trim();
     const gewicht  = $('gewicht').value.trim();
-
-    if (!material && !charge) {
-      toast('Заполните Materialnummer или Charge');
-      return;
-    }
-
-    // Запоминаем имя для следующих раз
+    if (!material && !charge) { toast('Заполните Materialnummer или Charge'); return; }
     if (name) localStorage.setItem(NAME_KEY, name);
-
     records.push({ material, name, charge, gewicht });
     localStorage.setItem(STORAGE_KEY, JSON.stringify(records));
     render();
-
-    // Очищаем всё, кроме Name (часто повторяется)
-    $('material').value = '';
-    $('charge').value = '';
-    $('gewicht').value = '';
+    $('material').value = ''; $('charge').value = ''; $('gewicht').value = '';
     $('material').focus();
-
     toast('Запись сохранена ✓');
   });
 
-  // -------- Удаление одной записи --------
   $('list').addEventListener('click', e => {
     if (e.target.classList.contains('del')) {
-      const i = +e.target.dataset.i;
-      records.splice(i, 1);
+      records.splice(+e.target.dataset.i, 1);
       localStorage.setItem(STORAGE_KEY, JSON.stringify(records));
       render();
-      toast('Удалено');
     }
   });
 
-  // -------- Очистить всё --------
   $('btnClear').addEventListener('click', () => {
-    if (records.length === 0) return;
-    if (!confirm('Удалить все записи?')) return;
-    records = [];
-    localStorage.removeItem(STORAGE_KEY);
-    render();
-    toast('Все записи удалены');
+    if (!records.length || !confirm('Удалить все записи?')) return;
+    records = []; localStorage.removeItem(STORAGE_KEY); render();
+    toast('Удалено');
   });
 
-  // -------- Экспорт CSV --------
+  // ---------- CSV ----------
   $('btnExport').addEventListener('click', () => {
-    if (records.length === 0) {
-      toast('Нет данных для экспорта');
-      return;
-    }
-    // Точка с запятой — Excel в DE откроет сразу по колонкам
+    if (!records.length) { toast('Нет данных'); return; }
     const rows = ['Materialnummer;Name;Charge;Gewicht'];
     records.forEach(r => {
-      rows.push([r.material, r.name, r.charge, r.gewicht]
-        .map(v => {
-          v = String(v ?? '');
-          return /[;"\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v;
-        })
-        .join(';'));
+      rows.push([r.material, r.name, r.charge, r.gewicht].map(v => {
+        v = String(v ?? '');
+        return /[;"\n]/.test(v) ? '"' + v.replace(/"/g,'""') + '"' : v;
+      }).join(';'));
     });
-    const csv = '\uFEFF' + rows.join('\n'); // BOM для Excel
+    const csv = '\uFEFF' + rows.join('\n');
     const filename = 'scan_export_' + new Date().toISOString().slice(0,10) + '.csv';
-
-    // Способ 1: Web Share API (лучший на телефоне — можно отправить по почте)
     try {
-      const file = new File([csv], filename, { type: 'text/csv' });
-      if (navigator.canShare && navigator.canShare({ files: [file] })) {
-        navigator.share({ files: [file], title: 'Scan Export' })
-          .then(() => toast('Экспортировано ✓'))
-          .catch(() => downloadFallback(csv, filename));
+      const file = new File([csv], filename, { type:'text/csv' });
+      if (navigator.canShare && navigator.canShare({ files:[file] })) {
+        navigator.share({ files:[file], title:'Scan Export' }).catch(()=>downloadFallback(csv,filename));
         return;
       }
-    } catch (e) { /* игнорируем */ }
-
+    } catch(e){}
     downloadFallback(csv, filename);
   });
-
   function downloadFallback(csv, filename) {
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+    const blob = new Blob([csv], { type:'text/csv;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
-    a.href = url;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    setTimeout(() => URL.revokeObjectURL(url), 3000);
-    toast('Файл сохранён в загрузки');
+    a.href = url; a.download = filename;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    setTimeout(()=>URL.revokeObjectURL(url), 3000);
+    toast('Файл сохранён');
   }
 
-  // -------- Сканирование --------
+  // ---------- Штрихкод ----------
   $('btnScan').addEventListener('click', async () => {
-    if (scanning) {
-      await stopScan();
-      return;
-    }
-
+    if (scanning) { await stopScan(); return; }
     const reader = $('reader');
     reader.classList.add('active');
-    $('btnScan').textContent = '⏹ Остановить сканер';
-
-    html5Qr = new Html5Qrcode('reader');
-
-    const config = {
-      fps: 10,
-      qrbox: { width: 260, height: 160 },
-      aspectRatio: 1.777,
-      formatsToSupport: [
-        Html5QrcodeSupportedFormats.CODE_128,
-        Html5QrcodeSupportedFormats.CODE_39,
-        Html5QrcodeSupportedFormats.EAN_13,
-        Html5QrcodeSupportedFormats.EAN_8,
-        Html5QrcodeSupportedFormats.UPC_A,
-        Html5QrcodeSupportedFormats.UPC_E,
-        Html5QrcodeSupportedFormats.QR_CODE,
-        Html5QrcodeSupportedFormats.ITF
-      ]
-    };
-
+    $('btnScan').textContent = '⏹ Остановить';
     try {
+      html5Qr = new Html5Qrcode('reader');
       await html5Qr.start(
         { facingMode: 'environment' },
-        config,
-        (decodedText) => {
-          // Успешное сканирование
-          $('charge').value = decodedText;
+        { fps:10, qrbox:{ width:280, height:160 } },
+        (text) => {
+          $('charge').value = text;
           if (navigator.vibrate) navigator.vibrate(60);
-          toast('Отсканировано: ' + decodedText);
+          toast('Штрихкод: ' + text);
           stopScan();
         },
-        () => { /* ошибки кадра игнорируем */ }
+        () => {}
       );
       scanning = true;
-    } catch (err) {
-      console.error(err);
-      toast('Ошибка камеры: ' + err.message, 3500);
-      reader.classList.remove('active');
-      $('btnScan').textContent = '📷 Штрихкод сканировать';
+    } catch (e) {
+      alert('Ошибка камеры: ' + (e.message || e));
+      stopScan();
     }
   });
-
   async function stopScan() {
-    if (html5Qr) {
-      try { await html5Qr.stop(); await html5Qr.clear(); } catch (e) {}
-      html5Qr = null;
-    }
     scanning = false;
+    if (html5Qr) { try { await html5Qr.stop(); await html5Qr.clear(); } catch(e){} html5Qr = null; }
     $('reader').classList.remove('active');
-    $('btnScan').textContent = '📷 Штрихкод сканировать';
+    $('btnScan').textContent = '▦ Сканировать штрихкод (Charge)';
+  }
+
+  // ---------- OCR ----------
+  $('btnOcr').addEventListener('click', () => {
+    const inp = document.createElement('input');
+    inp.type = 'file';
+    inp.accept = 'image/*';
+    inp.capture = 'environment';
+    inp.onchange = async () => {
+      const file = inp.files && inp.files[0];
+      if (!file) return;
+      const preview = $('preview');
+      preview.src = URL.createObjectURL(file);
+      preview.classList.add('active');
+      $('progress').classList.add('active');
+      $('btnOcr').disabled = true;
+      try {
+        const result = await Tesseract.recognize(file, 'deu+eng', {
+          logger: m => {
+            if (m.status === 'recognizing text') {
+              $('progress').textContent = 'Распознаю… ' + Math.round(m.progress*100) + '%';
+            }
+          }
+        });
+        const text = result.data.text || '';
+        console.log('OCR text:\n', text);
+        fillFields(text);
+        toast('Текст распознан ✓');
+      } catch (e) {
+        console.error(e);
+        alert('Ошибка OCR: ' + (e.message || e));
+      } finally {
+        $('progress').classList.remove('active');
+        $('progress').textContent = 'Распознаю текст… Подождите 5–15 сек.';
+        $('btnOcr').disabled = false;
+      }
+    };
+    inp.click();
+  });
+
+  // ---------- Парсинг распознанного текста ----------
+  function fillFields(raw) {
+    // 1) Нормализация
+    let t = raw.replace(/\r/g,'\n');
+    const up = t.toUpperCase();
+
+    // Materialnummer: 6 цифр (обычно в начале)
+    // Ищем последовательность из 6 цифр, которая НЕ является частью длинных чисел
+    const matMatch = t.match(/\b(\d{6})\b/);
+    if (matMatch) $('material').value = matMatch[1];
+
+    // Charge: SR + 6 цифр (общий паттерн) или через CHARGEN-NR
+    let charge = '';
+    const chargeLine = up.match(/CHARGEN?[-\s]*(?:NR\.?|NUMMER)?[:\s]*([A-Z]{1,3}\d{5,10})/);
+    if (chargeLine) charge = chargeLine[1];
+    if (!charge) {
+      const sr = up.match(/\b([A-Z]{2}\d{6,8})\b/);
+      if (sr) charge = sr[1];
+    }
+    if (charge) $('charge').value = charge;
+
+    // Gewicht: NETTO 300,000 KG / 300.000 KG / 25 KG
+    let gew = '';
+    const netto = up.match(/NETTO[:\s]*([\d.,]+)\s*(KG|G)\b/);
+    if (netto) {
+      gew = netto[1].replace(',', '.');
+      if (netto[2] === 'G') gew = (parseFloat(gew) / 1000).toFixed(3);
+    } else {
+      const kg = up.match(/([\d]{1,4}[.,]\d{1,3})\s*KG\b/);
+      if (kg) gew = kg[1].replace(',', '.');
+    }
+    if (gew) $('gewicht').value = gew;
+
+    // Name: строка с ® или бренд-подобная (заглавные латиница + цифры)
+    let name = '';
+    const lines = t.split('\n').map(s => s.trim()).filter(Boolean);
+    // Приоритет 1: строка с ®
+    for (const ln of lines) {
+      if (ln.includes('®') && ln.length > 4) { name = ln; break; }
+    }
+    // Приоритет 2: строка, похожая на "ELASTOSIL M 4601 A"
+    if (!name) {
+      for (const ln of lines) {
+        if (/^[A-ZÄÖÜ][A-ZÄÖÜ0-9\s\-\.]{4,}$/.test(ln) &&
+            /[A-Z]{3,}/.test(ln) &&
+            /\d/.test(ln) &&
+            !/CHARGEN|NETTO|PACKSTUCK|WGK|LGK|SBP6/i.test(ln)) {
+          name = ln; break;
+        }
+      }
+    }
+    // Очищаем ® и лишние пробелы
+    if (name) {
+      name = name.replace(/®/g,'').replace(/\s+/g,' ').trim();
+      $('name').value = name;
+    }
+
+    console.log('Parsed:', { material: $('material').value, charge: $('charge').value, gewicht: $('gewicht').value, name: $('name').value });
   }
 
   render();
