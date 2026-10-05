@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="theme-color" content="#0d6efd">
+<title>Etiketten Scanner</title>
+<style>
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body {
+    margin: 0;
+    font-family: -apple-system, system-ui, "Segoe UI", Roboto, sans-serif;
+    background: #f2f4f7;
+    color: #1a1a1a;
+    padding-bottom: 90px;
+  }
+  header {
+    background: #0d6efd;
+    color: #fff;
+    padding: 14px 16px;
+    font-size: 18px;
+    font-weight: 600;
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    box-shadow: 0 2px 6px rgba(0,0,0,.15);
+  }
+  .container { padding: 14px; max-width: 640px; margin: 0 auto; }
+  .card {
+    background: #fff;
+    border-radius: 12px;
+    padding: 14px;
+    margin-bottom: 14px;
+    box-shadow: 0 1px 4px rgba(0,0,0,.06);
+  }
+  label {
+    display: block;
+    font-size: 13px;
+    color: #555;
+    margin-bottom: 4px;
+    font-weight: 500;
+  }
+  input[type="text"], input[type="number"] {
+    width: 100%;
+    padding: 12px;
+    font-size: 16px;
+    border: 1px solid #d5d9e0;
+    border-radius: 8px;
+    background: #fafbfc;
+    outline: none;
+    margin-bottom: 12px;
+  }
+  input:focus { border-color: #0d6efd; background: #fff; }
+  button {
+    width: 100%;
+    padding: 14px;
+    font-size: 16px;
+    font-weight: 600;
+    border: none;
+    border-radius: 10px;
+    cursor: pointer;
+    margin-bottom: 8px;
+    transition: opacity .15s;
+  }
+  button:active { opacity: .75; }
+  .btn-primary { background: #0d6efd; color: #fff; }
+  .btn-scan    { background: #198754; color: #fff; }
+  .btn-save    { background: #ffc107; color: #212529; }
+  .btn-export  { background: #6f42c1; color: #fff; }
+  .btn-clear   { background: #e9ecef; color: #495057; font-weight: 500; }
+  .btn-row { display: flex; gap: 8px; }
+  .btn-row button { margin-bottom: 0; }
+  .counter {
+    display: inline-block;
+    background: #e7f1ff;
+    color: #0d6efd;
+    padding: 3px 10px;
+    border-radius: 20px;
+    font-size: 13px;
+    font-weight: 600;
+  }
+  .record {
+    background: #fff;
+    border-radius: 10px;
+    padding: 10px 12px;
+    margin-bottom: 8px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 14px;
+    box-shadow: 0 1px 3px rgba(0,0,0,.05);
+    border-left: 4px solid #0d6efd;
+  }
+  .record b { color: #0d6efd; }
+  .record .del {
+    background: #dc3545;
+    color: #fff;
+    border: none;
+    width: 34px;
+    height: 34px;
+    border-radius: 50%;
+    font-size: 18px;
+    padding: 0;
+    margin: 0;
+    flex-shrink: 0;
+  }
+  #reader { width: 100%; border-radius: 12px; overflow: hidden; margin-bottom: 12px; display: none; }
+  #reader.active { display: block; }
+  .toast {
+    position: fixed;
+    bottom: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: #212529;
+    color: #fff;
+    padding: 12px 20px;
+    border-radius: 25px;
+    font-size: 14px;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity .3s;
+    z-index: 100;
+    max-width: 90%;
+    text-align: center;
+  }
+  .toast.show { opacity: 1; }
+  .empty { text-align: center; color: #999; padding: 20px; font-size: 14px; }
+</style>
+</head>
+<body>
+
+<header>📦 Etiketten Scanner</header>
+
+<div class="container">
+
+  <div class="card">
+    <label>Materialnummer</label>
+    <input type="text" id="material" inputmode="numeric" placeholder="z.B. 201486">
+
+    <label>Name</label>
+    <input type="text" id="name" placeholder="z.B. ELASTOSIL M 4601 A">
+
+    <label>Charge</label>
+    <input type="text" id="charge" placeholder="z.B. SR104689">
+
+    <label>Gewicht (kg)</label>
+    <input type="number" id="gewicht" step="0.001" placeholder="z.B. 300.000">
+
+    <div id="reader"></div>
+
+    <button class="btn-scan" id="btnScan">📷 Штрихкод сканировать</button>
+    <button class="btn-save" id="btnSave">💾 Сохранить запись</button>
+  </div>
+
+  <div class="card">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+      <strong>Записи</strong>
+      <span class="counter" id="counter">0</span>
+    </div>
+    <div id="list"></div>
+
+    <div class="btn-row" style="margin-top:10px;">
+      <button class="btn-export" id="btnExport">📤 CSV</button>
+      <button class="btn-clear" id="btnClear">🗑 Очистить</button>
+    </div>
+  </div>
+
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+<script>
+(function () {
+  const $ = id => document.getElementById(id);
+  const STORAGE_KEY = 'etiketten_records';
+  const NAME_KEY = 'etiketten_last_name';
+
+  let records = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
+  let html5Qr = null;
+  let scanning = false;
+
+  // Восстанавливаем последнее введённое имя
+  $('name').value = localStorage.getItem(NAME_KEY) || '';
+
+  // -------- Toast --------
+  let toastTimer;
+  function toast(msg, ms = 2000) {
+    const t = $('toast');
+    t.textContent = msg;
+    t.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => t.classList.remove('show'), ms);
+  }
+
+  // -------- Рендер списка --------
+  function render() {
+    const list = $('list');
+    $('counter').textContent = records.length;
+    if (records.length === 0) {
+      list.innerHTML = '<div class="empty">Пока пусто. Отсканируйте и сохраните первую запись.</div>';
+      return;
+    }
+    list.innerHTML = records.map((r, i) => `
+      <div class="record">
+        <div>
+          <div><b>${esc(r.material || '—')}</b> · ${esc(r.name || '—')}</div>
+          <div style="font-size:12px;color:#666;margin-top:2px;">
+            Charge: ${esc(r.charge || '—')} · ${esc(r.gewicht || '—')} kg
+          </div>
+        </div>
+        <button class="del" data-i="${i}" aria-label="Удалить">×</button>
+      </div>
+    `).join('');
+  }
+
+  function esc(s) {
+    return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  }
+
+  // -------- Сохранить запись --------
+  $('btnSave').addEventListener('click', () => {
+    const material = $('material').value.trim();
+    const name     = $('name').value.trim();
+    const charge   = $('charge').value.trim();
+    const gewicht  = $('gewicht').value.trim();
+
+    if (!material && !charge) {
+      toast('Заполните Materialnummer или Charge');
+      return;
+    }
+
+    // Запоминаем имя для следующих раз
+    if (name) localStorage.setItem(NAME_KEY, name);
+
+    records.push({ material, name, charge, gewicht });
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(records));
+    render();
+
+    // Очищаем всё, кроме Name (часто повторяется)
+    $('material').value = '';
+    $('charge').value = '';
+    $('gewicht').value = '';
+    $('material').focus();
+
+    toast('Запись сохранена ✓');
+  });
+
+  // -------- Удаление одной записи --------
+  $('list').addEventListener('click', e => {
+    if (e.target.classList.contains('del')) {
+      const i = +e.target.dataset.i;
+      records.splice(i, 1);
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(records));
+      render();
+      toast('Удалено');
+    }
+  });
+
+  // -------- Очистить всё --------
+  $('btnClear').addEventListener('click', () => {
+    if (records.length === 0) return;
+    if (!confirm('Удалить все записи?')) return;
+    records = [];
+    localStorage.removeItem(STORAGE_KEY);
+    render();
+    toast('Все записи удалены');
+  });
+
+  // -------- Экспорт CSV --------
+  $('btnExport').addEventListener('click', () => {
+    if (records.length === 0) {
+      toast('Нет данных для экспорта');
+      return;
+    }
+    // Точка с запятой — Excel в DE откроет сразу по колонкам
+    const rows = ['Materialnummer;Name;Charge;Gewicht'];
+    records.forEach(r => {
+      rows.push([r.material, r.name, r.charge, r.gewicht]
+        .map(v => {
+          v = String(v ?? '');
+          return /[;"\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v;
+        })
+        .join(';'));
+    });
+    const csv = '\uFEFF' + rows.join('\n'); // BOM для Excel
+    const filename = 'scan_export_' + new Date().toISOString().slice(0,10) + '.csv';
+
+    // Способ 1: Web Share API (лучший на телефоне — можно отправить по почте)
+    try {
+      const file = new File([csv], filename, { type: 'text/csv' });
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        navigator.share({ files: [file], title: 'Scan Export' })
+          .then(() => toast('Экспортировано ✓'))
+          .catch(() => downloadFallback(csv, filename));
+        return;
+      }
+    } catch (e) { /* игнорируем */ }
+
+    downloadFallback(csv, filename);
+  });
+
+  function downloadFallback(csv, filename) {
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 3000);
+    toast('Файл сохранён в загрузки');
+  }
+
+  // -------- Сканирование --------
+  $('btnScan').addEventListener('click', async () => {
+    if (scanning) {
+      await stopScan();
+      return;
+    }
+
+    const reader = $('reader');
+    reader.classList.add('active');
+    $('btnScan').textContent = '⏹ Остановить сканер';
+
+    html5Qr = new Html5Qrcode('reader');
+
+    const config = {
+      fps: 10,
+      qrbox: { width: 260, height: 160 },
+      aspectRatio: 1.777,
+      formatsToSupport: [
+        Html5QrcodeSupportedFormats.CODE_128,
+        Html5QrcodeSupportedFormats.CODE_39,
+        Html5QrcodeSupportedFormats.EAN_13,
+        Html5QrcodeSupportedFormats.EAN_8,
+        Html5QrcodeSupportedFormats.UPC_A,
+        Html5QrcodeSupportedFormats.UPC_E,
+        Html5QrcodeSupportedFormats.QR_CODE,
+        Html5QrcodeSupportedFormats.ITF
+      ]
+    };
+
+    try {
+      await html5Qr.start(
+        { facingMode: 'environment' },
+        config,
+        (decodedText) => {
+          // Успешное сканирование
+          $('charge').value = decodedText;
+          if (navigator.vibrate) navigator.vibrate(60);
+          toast('Отсканировано: ' + decodedText);
+          stopScan();
+        },
+        () => { /* ошибки кадра игнорируем */ }
+      );
+      scanning = true;
+    } catch (err) {
+      console.error(err);
+      toast('Ошибка камеры: ' + err.message, 3500);
+      reader.classList.remove('active');
+      $('btnScan').textContent = '📷 Штрихкод сканировать';
+    }
+  });
+
+  async function stopScan() {
+    if (html5Qr) {
+      try { await html5Qr.stop(); await html5Qr.clear(); } catch (e) {}
+      html5Qr = null;
+    }
+    scanning = false;
+    $('reader').classList.remove('active');
+    $('btnScan').textContent = '📷 Штрихкод сканировать';
+  }
+
+  render();
+})();
+</script>
+</body>
+</html>
