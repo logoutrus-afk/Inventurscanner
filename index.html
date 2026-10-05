@@ -17,7 +17,6 @@
   button { width:100%; padding:14px; font-size:16px; font-weight:600; border:none; border-radius:10px; cursor:pointer; margin-bottom:8px; transition:opacity .15s; }
   button:active { opacity:.75; }
   button:disabled { opacity:.5; cursor:wait; }
-  .btn-primary { background:#0d6efd; color:#fff; }
   .btn-ocr    { background:#198754; color:#fff; }
   .btn-gal    { background:#20c997; color:#fff; }
   .btn-scan   { background:#0d6efd; color:#fff; }
@@ -118,6 +117,7 @@
     clearTimeout(toastTimer);
     toastTimer = setTimeout(() => t.classList.remove('show'), ms);
   }
+
   function render() {
     const list = $('list');
     $('counter').textContent = records.length;
@@ -139,7 +139,7 @@
   }
   function esc(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 
-  // ---------- Сохранение ----------
+  // ---------- Сохранение записи ----------
   $('btnSave').addEventListener('click', () => {
     const material = $('material').value.trim();
     const name     = $('name').value.trim();
@@ -154,6 +154,7 @@
     $('material').focus();
     toast('Запись сохранена ✓');
   });
+
   $('list').addEventListener('click', e => {
     if (e.target.classList.contains('del')) {
       records.splice(+e.target.dataset.i, 1);
@@ -161,13 +162,14 @@
       render();
     }
   });
+
   $('btnClear').addEventListener('click', () => {
     if (!records.length || !confirm('Удалить все записи?')) return;
     records = []; localStorage.removeItem(STORAGE_KEY); render();
     toast('Удалено');
   });
 
-  // ---------- CSV ----------
+  // ---------- Экспорт CSV ----------
   $('btnExport').addEventListener('click', () => {
     if (!records.length) { toast('Нет данных'); return; }
     const rows = ['Materialnummer;Name;Charge;Gewicht'];
@@ -188,6 +190,7 @@
     } catch(e){}
     downloadFallback(csv, filename);
   });
+
   function downloadFallback(csv, filename) {
     const blob = new Blob([csv], { type:'text/csv;charset=utf-8' });
     const url = URL.createObjectURL(blob);
@@ -198,7 +201,7 @@
     toast('Файл сохранён');
   }
 
-  // ---------- Штрихкод ----------
+  // ---------- Сканирование штрихкода ----------
   $('btnScan').addEventListener('click', async () => {
     if (scanning) { await stopScan(); return; }
     const reader = $('reader');
@@ -223,6 +226,7 @@
       stopScan();
     }
   });
+
   async function stopScan() {
     scanning = false;
     if (html5Qr) { try { await html5Qr.stop(); await html5Qr.clear(); } catch(e){} html5Qr = null; }
@@ -230,16 +234,14 @@
     $('btnScan').textContent = '▦ Сканировать штрихкод (Charge)';
   }
 
-  // ---------- OCR (общий пайплайн) ----------
+  // ---------- OCR ----------
   async function runOcr(file) {
     if (!file) return;
 
-    // Превью
     const preview = $('preview');
     preview.src = URL.createObjectURL(file);
     preview.classList.add('active');
 
-    // Показываем прогресс
     $('progress').classList.add('active');
     $('progress').textContent = 'Распознаю… 0%';
     $('btnOcrCamera').disabled = true;
@@ -256,11 +258,9 @@
       const text = result.data.text || '';
       console.log('=== OCR RAW TEXT ===\n' + text + '\n===================');
 
-      // Показываем распознанный текст
       $('rawText').value = text;
       $('rawBox').classList.add('active');
 
-      // Парсим и заполняем поля
       const filled = fillFields(text);
       const filledCount = Object.values(filled).filter(Boolean).length;
 
@@ -279,7 +279,7 @@
     }
   }
 
-  // Камера
+  // Камера → распознать
   $('btnOcrCamera').addEventListener('click', () => {
     const inp = document.createElement('input');
     inp.type = 'file';
@@ -289,43 +289,80 @@
     inp.click();
   });
 
-  // Галерея
+  // Галерея → распознать
   $('btnOcrGallery').addEventListener('click', () => {
     const inp = document.createElement('input');
     inp.type = 'file';
     inp.accept = 'image/*';
-    // без capture → Android покажет выбор: камера / галерея / файлы
     inp.onchange = () => runOcr(inp.files && inp.files[0]);
     inp.click();
   });
 
-  // ---------- Парсинг ----------
+  // ---------- Парсинг распознанного текста ----------
   function fillFields(raw) {
     const filled = { material:false, name:false, charge:false, gewicht:false };
 
-    // Нормализация: убираем BOM и заменяем нестандартные символы
+    // Нормализация
     let t = raw
       .replace(/\uFEFF/g, '')
-      .replace(/[Ⓡ]/g, '®')
+      .replace(/[Ⓡ©Ⓢ]/g, '®')
       .replace(/\r/g, '\n');
-    const up = t.toUpperCase();
 
-    // MATERIALNUMMER: 6 цифр как отдельное слово
-    // Исключаем длинные последовательности (штрихкоды)
-    const matM = t.match(/(?:^|[^\d])(\d{6})(?!\d)/);
-    if (matM) {
-      $('material').value = matM[1];
+    const lines   = t.split('\n').map(s => s.trim()).filter(Boolean);
+    const linesUp = lines.map(s => s.toUpperCase());
+
+    // ============================================================
+    // 1) MATERIALNUMMER — только рядом с «PACKSTUCK»
+    // ============================================================
+    // Ищем строку с PACKSTUCK (с учётом типичных ошибок OCR)
+    const packRe = /P\s*[AА]\s*C\s*[KК]\s*[\s\-]*S\s*T\s*[UÜUО]\s*C\s*[KК]/i;
+
+    let packIdx = -1;
+    for (let i = 0; i < linesUp.length; i++) {
+      if (packRe.test(linesUp[i])) { packIdx = i; break; }
+    }
+
+    let material = '';
+
+    if (packIdx >= 0) {
+      // Ищем 6-значное число в окне: строка с PACKSTUCK ± 2 строки
+      const start = Math.max(0, packIdx - 2);
+      const end   = Math.min(lines.length - 1, packIdx + 2);
+
+      for (let i = start; i <= end && !material; i++) {
+        const ln = lines[i];
+        const m = ln.match(/(?:^|[^\d])(\d{6})(?!\d)/);
+        if (m) material = m[1];
+      }
+    }
+
+    // Фолбэк 1: до слова CHARGE найти 6-значное число
+    if (!material) {
+      const beforeCharge = t.split(/CHARGEN?/i)[0];
+      const m = beforeCharge.match(/(?:^|[^\d])(\d{6})(?!\d)/);
+      if (m) material = m[1];
+    }
+
+    // Фолбэк 2: самое первое 6-значное число
+    if (!material) {
+      const m = t.match(/(?:^|[^\d])(\d{6})(?!\d)/);
+      if (m) material = m[1];
+    }
+
+    if (material) {
+      $('material').value = material;
       filled.material = true;
     }
 
-    // CHARGE: буквы + цифры, обычно SRxxxxxx
-    // Ищем по "CHARGEN", иначе по общему шаблону
+    // ============================================================
+    // 2) CHARGE — SRxxxxxx или после CHARGEN-NR
+    // ============================================================
     let charge = '';
-    const chargeCtx = up.match(/CHARGEN?[^\n]{0,20}?([A-Z]{1,4}\s?\d{5,10})/);
+    const chargeCtx = t.match(/CHARGEN?\s*[-\s]*(?:NR\.?)?[:\s]*([A-Z]{1,4}\s?\d{5,10})/i);
     if (chargeCtx) {
-      charge = chargeCtx[1].replace(/\s/g, '');
+      charge = chargeCtx[1].replace(/\s/g, '').toUpperCase();
     } else {
-      const c2 = up.match(/\b([A-Z]{2}\d{6,8})\b/);
+      const c2 = t.toUpperCase().match(/\b([A-Z]{2}\d{6,8})\b/);
       if (c2) charge = c2[1];
     }
     if (charge) {
@@ -333,14 +370,17 @@
       filled.charge = true;
     }
 
-    // GEWICHT
+    // ============================================================
+    // 3) GEWICHT — NETTO xxx,xxx KG
+    // ============================================================
     let gew = '';
-    const netto = up.match(/NETTO[^\d]{0,10}([\d]+[.,][\d]+)\s*(KG|G)?/);
+    const up = t.toUpperCase();
+    const netto = up.match(/NETTO[^\d]{0,10}(\d+[.,]\d+)\s*(KG|G)?/);
     if (netto) {
       gew = netto[1].replace(',', '.');
       if (netto[2] === 'G') gew = (parseFloat(gew) / 1000).toFixed(3);
     } else {
-      const g2 = up.match(/([\d]+[.,][\d]{2,3})\s*KG/);
+      const g2 = up.match(/(\d+[.,]\d{2,3})\s*KG/);
       if (g2) gew = g2[1].replace(',', '.');
     }
     if (gew) {
@@ -348,42 +388,42 @@
       filled.gewicht = true;
     }
 
-    // NAME: ищем строку с ® или похожую на техническое название
+    // ============================================================
+    // 4) NAME — строка с ® или известный бренд
+    // ============================================================
     let name = '';
-    const lines = t.split('\n').map(s => s.trim()).filter(Boolean);
 
-    // Приоритет 1: строка с ®
+    // Приоритет 1: строка с ® или ©/Ⓡ
     for (const ln of lines) {
-      if (/®/.test(ln) && ln.replace(/®/g,'').trim().length > 4) {
+      if (/[®©Ⓡ]/.test(ln) && ln.replace(/[®©Ⓡ]/g, '').trim().length > 4) {
         name = ln; break;
       }
     }
 
-    // Приоритет 2: ищем "ELASTOSIL" или подобный бренд
+    // Приоритет 2: известный бренд
     if (!name) {
-      const brands = /\b(ELASTOSIL|WACKER|SILICONE|SILICON|ELASTOSIL|TEROSON|LOCTITE|SIKA|3M|DOW|HENKEL)\b/i;
+      const brands = /\b(ELASTOSIL|WACKER|SILICONE|SILICON|TEROSON|LOCTITE|SIKA|DOW|HENKEL|MOMENTIVE)\b/i;
       for (const ln of lines) {
         if (brands.test(ln)) { name = ln; break; }
       }
     }
 
-    // Приоритет 3: строка с заглавными буквами + цифрами, не технические термины
+    // Приоритет 3: строка с заглавными латинскими буквами + цифрами
     if (!name) {
       for (const ln of lines) {
-        const upLn = ln.toUpperCase();
-        if (upLn.length >= 6 &&
-            upLn.length <= 40 &&
-            !/CHARGEN|NETTO|PACKSTUCK|WGK|LGK|SBP6|TROCKEN|FEUCHTIGKEIT|SCHUTZEN|LAGERN|ELEKTROSTAT|ANFRAGE|SICHERHEITSDATENBLATT|MATERIAL/i.test(upLn) &&
-            /[A-Z]{4,}/.test(upLn) &&
-            /\d/.test(upLn) &&
-            /^[A-Z0-9ÄÖÜ\s\-\.®]+$/.test(upLn)) {
+        const u = ln.toUpperCase();
+        if (u.length >= 6 && u.length <= 40 &&
+            !/CHARGEN|NETTO|PACKSTUCK|WGK|LGK|SBP6|TROCKEN|FEUCHTIG|SCHUTZ|LAGER|ELEKTROST|ANFRAGE|SICHERHEIT|MATERIAL/i.test(u) &&
+            /[A-Z]{4,}/.test(u) &&
+            /\d/.test(u) &&
+            /^[A-Z0-9ÄÖÜ\s\-\.®]+$/.test(u)) {
           name = ln; break;
         }
       }
     }
 
     if (name) {
-      name = name.replace(/®/g, '').replace(/\s+/g, ' ').trim();
+      name = name.replace(/[®©Ⓡ]/g, '').replace(/\s+/g, ' ').trim();
       if (name.length >= 3) {
         $('name').value = name;
         filled.name = true;
@@ -392,9 +432,9 @@
 
     console.log('Parsed fields:', filled, {
       material: $('material').value,
-      name: $('name').value,
-      charge: $('charge').value,
-      gewicht: $('gewicht').value
+      name:     $('name').value,
+      charge:   $('charge').value,
+      gewicht:  $('gewicht').value
     });
 
     return filled;
