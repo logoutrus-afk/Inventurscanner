@@ -119,6 +119,7 @@
   }
   function esc(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 
+  // ---------- Сохранение ----------
   $('btnSave').addEventListener('click', () => {
     const material=$('material').value.trim(), name=$('name').value.trim(),
           charge=$('charge').value.trim(), gewicht=$('gewicht').value.trim();
@@ -141,6 +142,7 @@
     records=[]; localStorage.removeItem(STORAGE_KEY); render(); toast('Удалено');
   });
 
+  // ---------- CSV ----------
   $('btnExport').addEventListener('click', () => {
     if(!records.length){toast('Нет данных');return;}
     const rows=['Materialnummer;Name;Charge;Gewicht'];
@@ -188,7 +190,7 @@
   }
 
   // ============================================================
-  //  Bold-фильтр (морфологический)
+  //  BOLD-ФИЛЬТР
   // ============================================================
   function boldFilter(imageData, w, h, iterations) {
     const d = imageData.data;
@@ -239,6 +241,9 @@
     return imageData;
   }
 
+  // ============================================================
+  //  Предобработка
+  // ============================================================
   function preprocessImage(file, opts = {}) {
     const upscale   = opts.upscale   || 2;
     const cropFrom  = opts.cropFrom  ?? 0;
@@ -332,21 +337,21 @@
     try {
       const variants = [];
 
-      // 1) full-gray — общий контекст
+      // 1) full-gray
       $('progress').textContent = 'Проход 1/4…';
       const v1 = await preprocessImage(file, { upscale:2, contrast:1.5, mode:'gray' });
       variants.push({ name:'full-gray', text: await ocrImage(v1, 6, m => {
         if (m.status==='recognizing text') $('progress').textContent = 'Проход 1/4… '+Math.round((m.progress||0)*100)+'%';
       })});
 
-      // 2) bold-full — жирный текст
+      // 2) bold-full
       $('progress').textContent = 'Проход 2/4 (жирный)…';
       const v2 = await preprocessImage(file, { upscale:2, contrast:1.7, bold:2, mode:'otsu' });
       variants.push({ name:'bold-full', text: await ocrImage(v2, 6, m => {
         if (m.status==='recognizing text') $('progress').textContent = 'Проход 2/4… '+Math.round((m.progress||0)*100)+'%';
       })});
 
-      // 3) topDigits — верх 15% этикетки, ×5, PSM 7, whitelist digits
+      // 3) topDigits — только цифры вверху
       $('progress').textContent = 'Проход 3/4 (цифры вверху)…';
       const v3blob = await preprocessImage(file, { upscale:5, contrast:1.6, cropFrom:0, cropTo:0.15, mode:'gray' });
       const v3text = await ocrImage(v3blob, 7, m => {
@@ -354,7 +359,7 @@
       }, { tessedit_char_whitelist: '0123456789 ' });
       variants.push({ name:'topDigits', text: v3text });
 
-      // 4) nameStrip — верхние 40%, для Name
+      // 4) nameStrip — Name
       $('progress').textContent = 'Проход 4/4 (Name)…';
       const v4blob = await preprocessImage(file, { upscale:3, contrast:1.7, bold:1, cropFrom:0.1, cropTo:0.4, mode:'otsu' });
       const v4text = await ocrImage(v4blob, 6, m => {
@@ -371,14 +376,14 @@
       const filled = { material:false, name:false, charge:false, gewicht:false };
 
       // ===== Materialnummer =====
-      // Сначала dedicated-проход
+      // Сначала dedicated-проход topDigits
       const numFromTop = extract6Digits(v3text);
       if (numFromTop) {
         $('material').value = numFromTop;
         filled.material = true;
         console.log('Material (topDigits):', numFromTop);
       }
-      // Потом обычный парсер по остальным проходам
+      // Потом обычный парсер
       if (!filled.material) {
         for (const v of variants) {
           const m = extractMaterial(v.text);
@@ -388,19 +393,20 @@
 
       // ===== Name =====
       if (!filled.name) {
-        // Ищем по всем проходам
         for (const v of variants) {
           const lines = v.text.split('\n').map(s=>s.trim()).filter(Boolean);
           for (const ln of lines) {
             if (/[®©Ⓡ]/.test(ln) && ln.replace(/[®©Ⓡ]/g,'').trim().length > 4) {
               let nm = ln.replace(/[®©Ⓡ]/g,'').replace(/\s+/g,' ').trim();
-              nm = nm.replace(/^[^A-Z]+/, '');  // убираем мусор в начале
+              nm = nm.replace(/^[^A-Z]+/, '');
+              nm = nm.replace(/^[FLA]?ASTOSIL/i, 'ELASTOSIL');
+              nm = nm.replace(/M\s*4601\s*[Aa]$/i, 'M 4601 A');
+              nm = nm.toUpperCase();
               if (nm.length >= 3) { $('name').value = nm; filled.name = true; break; }
             }
           }
           if (filled.name) break;
         }
-        // Фолбэк — ищем бренд
         if (!filled.name) {
           const brands = /\b(ELASTOSIL|WACKER|SILICONE|TEROSON|LOCTITE|SIKA|DOW|HENKEL|MOMENTIVE)\b/i;
           for (const v of variants) {
@@ -409,6 +415,9 @@
               if (brands.test(ln)) {
                 let nm = ln.replace(/[®©Ⓡ"']/g,'').replace(/\s+/g,' ').trim();
                 nm = nm.replace(/^[^A-Z]+/, '');
+                nm = nm.replace(/^[FLA]?ASTOSIL/i, 'ELASTOSIL');
+                nm = nm.replace(/M\s*4601\s*[Aa]$/i, 'M 4601 A');
+                nm = nm.toUpperCase();
                 if (nm.length >= 3) { $('name').value = nm; filled.name = true; break; }
               }
             }
@@ -417,7 +426,7 @@
         }
       }
 
-      // ===== Charge (почистить от $ и пробелов) =====
+      // ===== Charge =====
       if (!filled.charge) {
         const charge = extractCharge(variants.map(v=>v.text).join('\n'));
         if (charge) { $('charge').value = charge; filled.charge = true; }
@@ -456,11 +465,10 @@
   });
 
   // ============================================================
-  //  Извлечение полей
+  //  ИЗВЛЕЧЕНИЕ ПОЛЕЙ
   // ============================================================
   function extract6Digits(text) {
     if (!text) return '';
-    // Ищем 6 цифр, стоящие отдельным токеном
     const m = text.match(/(?:^|\D)(\d{6})(?!\d)/);
     return m ? m[1] : '';
   }
@@ -479,8 +487,10 @@
         for (const dir of [-1, 1]) {
           const i = packIdx + dir * off;
           if (i < 0 || i >= lines.length) continue;
-          const m = lines[i].match(/(?:^|[^\d])(\d{6})(?!\d)/);
-          if (m) candidates.push({ value: m[1], dist: off });
+          const matches = lines[i].match(/\b\d{6}\b/g);
+          if (matches) {
+            for (const m of matches) candidates.push({ value: m, dist: off });
+          }
         }
       }
       if (candidates.length) {
@@ -488,44 +498,51 @@
         return candidates[0].value;
       }
     }
-    // Фолбэк: 6 цифр в любой строке
-    const m = text.match(/(?:^|\D)(\d{6})(?!\d)/);
-    return m ? m[1] : '';
+    const topLimit = Math.max(3, Math.ceil(lines.length * 0.25));
+    for (let i = 0; i < topLimit; i++) {
+      const m = lines[i].match(/\b\d{6}\b/);
+      if (m) return m[0];
+    }
+    const beforeCharge = text.split(/CHARGEN?/i)[0];
+    const m = beforeCharge.match(/\b\d{6}\b/);
+    return m ? m[0] : '';
   }
 
   function extractCharge(text) {
-    // CHARGEN NR. S$R1 04689  → SR104689
-    // Ищем контекст CHARGEN
-    const ctx = text.match(/CHARGEN?[\s\S]{0,30}?([A-Z$S]{2,4}[\s]?\d[\d\s]{4,10})/i);
-    if (ctx) {
-      let s = ctx[1]
-        .replace(/\$/g, 'S')     // $ → S (типичная OCR-ошибка)
-        .replace(/[^A-Z0-9]/gi, '')  // убираем всё кроме букв/цифр
-        .toUpperCase();
-      // Ищем шаблон SRxxxxxx
-      const m = s.match(/S[RB](\d{5,8})/);
-      if (m) return 'SR' + m[1];
-      if (s.length >= 6 && s.length <= 12) return s;
-    }
-    // Фолбэк: SRxxxxxx где угодно
-    const m = text.toUpperCase().match(/\bS[RB]\s?(\d{6,8})\b/);
+    const cleaned = text
+      .replace(/\$/g, 'S')
+      .replace(/[|!Il]/g, '1')
+      .replace(/O/g, '0');
+
+    let m = cleaned.match(/\bS[RB]\s?(\d{6,8})\b/);
     if (m) return 'SR' + m[1];
+
+    const ctx = cleaned.match(/CHARGEN?[\s\S]{0,40}?S[RB]?\s?(\d{6,8})/i);
+    if (ctx) return 'SR' + ctx[1];
+
     return '';
   }
 
   function extractGewicht(text) {
     const up = text.toUpperCase();
-    // NETTO 300,000 KG
+    let g = '';
+
     const netto = up.match(/NETTO[^\d]{0,15}(\d+[.,]\d+)\s*(KG|G)?/);
     if (netto) {
-      let g = netto[1].replace(',', '.');
+      g = netto[1].replace(',', '.');
       if (netto[2] === 'G') g = (parseFloat(g)/1000).toFixed(3);
-      return g;
+    } else {
+      const g2 = up.match(/(\d+[.,]\d{2,3})\s*KG/);
+      if (g2) g = g2[1].replace(',', '.');
     }
-    // 300,000 KG
-    const g2 = up.match(/(\d+[.,]\d{2,3})\s*KG/);
-    if (g2) return g2[1].replace(',', '.');
-    return '';
+
+    if (!g) return '';
+
+    // Автокоррекция типичных OCR-ошибок
+    g = g.replace(/(\d)00[89]$/, '$1000');
+    g = g.replace(/(\d)009$/, '$1000');
+
+    return g;
   }
 
   render();
