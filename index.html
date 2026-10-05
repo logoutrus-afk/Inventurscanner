@@ -6,42 +6,41 @@
 <meta name="theme-color" content="#0d6efd">
 <title>Etiketten Scanner</title>
 <style>
-  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
-  body { margin:0; font-family:-apple-system,system-ui,"Segoe UI",Roboto,sans-serif; background:#f2f4f7; color:#1a1a1a; padding-bottom:90px; }
-  header { background:#0d6efd; color:#fff; padding:14px 16px; font-size:18px; font-weight:600; position:sticky; top:0; z-index:10; box-shadow:0 2px 6px rgba(0,0,0,.15); }
-  .container { padding:14px; max-width:640px; margin:0 auto; }
-  .card { background:#fff; border-radius:12px; padding:14px; margin-bottom:14px; box-shadow:0 1px 4px rgba(0,0,0,.06); }
-  label { display:block; font-size:13px; color:#555; margin-bottom:4px; font-weight:500; }
-  input[type="text"], input[type="number"] { width:100%; padding:12px; font-size:16px; border:1px solid #d5d9e0; border-radius:8px; background:#fafbfc; outline:none; margin-bottom:12px; }
-  input:focus { border-color:#0d6efd; background:#fff; }
-  button { width:100%; padding:14px; font-size:16px; font-weight:600; border:none; border-radius:10px; cursor:pointer; margin-bottom:8px; transition:opacity .15s; }
-  button:active { opacity:.75; }
-  button:disabled { opacity:.5; cursor:wait; }
-  .btn-ocr    { background:#198754; color:#fff; }
-  .btn-gal    { background:#20c997; color:#fff; }
-  .btn-scan   { background:#0d6efd; color:#fff; }
-  .btn-save   { background:#ffc107; color:#212529; }
-  .btn-export { background:#6f42c1; color:#fff; }
-  .btn-clear  { background:#e9ecef; color:#495057; font-weight:500; }
-  .btn-row { display:flex; gap:8px; }
-  .btn-row button { margin-bottom:0; }
-  .counter { display:inline-block; background:#e7f1ff; color:#0d6efd; padding:3px 10px; border-radius:20px; font-size:13px; font-weight:600; }
-  .record { background:#fff; border-radius:10px; padding:10px 12px; margin-bottom:8px; display:flex; justify-content:space-between; align-items:center; font-size:14px; box-shadow:0 1px 3px rgba(0,0,0,.05); border-left:4px solid #0d6efd; }
-  .record b { color:#0d6efd; }
-  .record .del { background:#dc3545; color:#fff; border:none; width:34px; height:34px; border-radius:50%; font-size:18px; padding:0; margin:0; flex-shrink:0; }
-  #reader { width:100%; border-radius:12px; overflow:hidden; margin-bottom:12px; display:none; }
-  #reader.active { display:block; }
-  #preview { width:100%; border-radius:12px; margin-bottom:12px; display:none; }
-  #preview.active { display:block; }
-  #progress { display:none; text-align:center; padding:10px; color:#0d6efd; font-size:14px; background:#e7f1ff; border-radius:8px; margin-bottom:10px; }
-  #progress.active { display:block; }
-  #rawBox { display:none; margin-bottom:10px; }
-  #rawBox.active { display:block; }
-  #rawText { width:100%; min-height:120px; font-family:monospace; font-size:12px; padding:8px; border:1px solid #d5d9e0; border-radius:8px; background:#fafbfc; resize:vertical; }
-  .toast { position:fixed; bottom:20px; left:50%; transform:translateX(-50%); background:#212529; color:#fff; padding:12px 20px; border-radius:25px; font-size:14px; opacity:0; pointer-events:none; transition:opacity .3s; z-index:100; max-width:90%; text-align:center; }
-  .toast.show { opacity:1; }
-  .empty { text-align:center; color:#999; padding:20px; font-size:14px; }
-  .hint { font-size:12px; color:#888; margin-top:-6px; margin-bottom:10px; }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  body{margin:0;font-family:-apple-system,system-ui,"Segoe UI",Roboto,sans-serif;background:#f2f4f7;color:#1a1a1a;padding-bottom:90px}
+  header{background:#0d6efd;color:#fff;padding:14px 16px;font-size:18px;font-weight:600;position:sticky;top:0;z-index:10;box-shadow:0 2px 6px rgba(0,0,0,.15)}
+  .container{padding:14px;max-width:640px;margin:0 auto}
+  .card{background:#fff;border-radius:12px;padding:14px;margin-bottom:14px;box-shadow:0 1px 4px rgba(0,0,0,.06)}
+  label{display:block;font-size:13px;color:#555;margin-bottom:4px;font-weight:500}
+  input[type="text"],input[type="number"]{width:100%;padding:12px;font-size:16px;border:1px solid #d5d9e0;border-radius:8px;background:#fafbfc;outline:none;margin-bottom:12px}
+  input:focus{border-color:#0d6efd;background:#fff}
+  button{width:100%;padding:14px;font-size:16px;font-weight:600;border:none;border-radius:10px;cursor:pointer;margin-bottom:8px;transition:opacity .15s}
+  button:active{opacity:.75}
+  button:disabled{opacity:.5;cursor:wait}
+  .btn-ocr{background:#198754;color:#fff}
+  .btn-gal{background:#20c997;color:#fff}
+  .btn-scan{background:#0d6efd;color:#fff}
+  .btn-save{background:#ffc107;color:#212529}
+  .btn-export{background:#6f42c1;color:#fff}
+  .btn-clear{background:#e9ecef;color:#495057;font-weight:500}
+  .btn-row{display:flex;gap:8px}
+  .btn-row button{margin-bottom:0}
+  .counter{display:inline-block;background:#e7f1ff;color:#0d6efd;padding:3px 10px;border-radius:20px;font-size:13px;font-weight:600}
+  .record{background:#fff;border-radius:10px;padding:10px 12px;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center;font-size:14px;box-shadow:0 1px 3px rgba(0,0,0,.05);border-left:4px solid #0d6efd}
+  .record b{color:#0d6efd}
+  .record .del{background:#dc3545;color:#fff;border:none;width:34px;height:34px;border-radius:50%;font-size:18px;padding:0;margin:0;flex-shrink:0}
+  #reader{width:100%;border-radius:12px;overflow:hidden;margin-bottom:12px;display:none}
+  #reader.active{display:block}
+  #preview{width:100%;border-radius:12px;margin-bottom:12px;display:none}
+  #preview.active{display:block}
+  #progress{display:none;text-align:center;padding:10px;color:#0d6efd;font-size:14px;background:#e7f1ff;border-radius:8px;margin-bottom:10px}
+  #progress.active{display:block}
+  #rawBox{display:none;margin-bottom:10px}
+  #rawBox.active{display:block}
+  #rawText{width:100%;min-height:120px;font-family:monospace;font-size:12px;padding:8px;border:1px solid #d5d9e0;border-radius:8px;background:#fafbfc;resize:vertical}
+  .toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#212529;color:#fff;padding:12px 20px;border-radius:25px;font-size:14px;opacity:0;pointer-events:none;transition:opacity .3s;z-index:100;max-width:90%;text-align:center}
+  .toast.show{opacity:1}
+  .empty{text-align:center;color:#999;padding:20px;font-size:14px}
 </style>
 </head>
 <body>
@@ -57,7 +56,7 @@
 
     <div id="reader"></div>
     <img id="preview" alt="">
-    <div id="progress">Распознаю… Подождите 5–15 сек.</div>
+    <div id="progress">Распознаю… Подождите 5–20 сек.</div>
 
     <div id="rawBox">
       <label>Распознанный текст (для проверки):</label>
@@ -80,12 +79,12 @@
   </div>
 
   <div class="card">
-    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
       <strong>Записи</strong>
       <span class="counter" id="counter">0</span>
     </div>
     <div id="list"></div>
-    <div class="btn-row" style="margin-top:10px;">
+    <div class="btn-row" style="margin-top:10px">
       <button class="btn-export" id="btnExport">📤 CSV</button>
       <button class="btn-clear" id="btnClear">🗑 Очистить</button>
     </div>
@@ -110,164 +109,204 @@
   $('name').value = localStorage.getItem(NAME_KEY) || '';
 
   let toastTimer;
-  function toast(msg, ms = 2500) {
-    const t = $('toast');
-    t.textContent = msg;
-    t.classList.add('show');
-    clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => t.classList.remove('show'), ms);
+  function toast(msg, ms=2500){
+    const t=$('toast'); t.textContent=msg; t.classList.add('show');
+    clearTimeout(toastTimer); toastTimer=setTimeout(()=>t.classList.remove('show'), ms);
   }
-
-  function render() {
-    const list = $('list');
-    $('counter').textContent = records.length;
-    if (!records.length) {
-      list.innerHTML = '<div class="empty">Пока пусто. Распознайте этикетку и сохраните запись.</div>';
-      return;
-    }
-    list.innerHTML = records.map((r, i) => `
+  function render(){
+    const list=$('list'); $('counter').textContent=records.length;
+    if(!records.length){list.innerHTML='<div class="empty">Пока пусто.</div>';return;}
+    list.innerHTML=records.map((r,i)=>`
       <div class="record">
         <div>
-          <div><b>${esc(r.material || '—')}</b> · ${esc(r.name || '—')}</div>
-          <div style="font-size:12px;color:#666;margin-top:2px;">
-            Charge: ${esc(r.charge || '—')} · ${esc(r.gewicht || '—')} kg
-          </div>
+          <div><b>${esc(r.material||'—')}</b> · ${esc(r.name||'—')}</div>
+          <div style="font-size:12px;color:#666;margin-top:2px">Charge: ${esc(r.charge||'—')} · ${esc(r.gewicht||'—')} kg</div>
         </div>
         <button class="del" data-i="${i}">×</button>
-      </div>
-    `).join('');
+      </div>`).join('');
   }
   function esc(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 
-  // ---------- Сохранение записи ----------
+  // ---------- Сохранение ----------
   $('btnSave').addEventListener('click', () => {
-    const material = $('material').value.trim();
-    const name     = $('name').value.trim();
-    const charge   = $('charge').value.trim();
-    const gewicht  = $('gewicht').value.trim();
-    if (!material && !charge) { toast('Заполните Materialnummer или Charge'); return; }
-    if (name) localStorage.setItem(NAME_KEY, name);
-    records.push({ material, name, charge, gewicht });
+    const material=$('material').value.trim(), name=$('name').value.trim(),
+          charge=$('charge').value.trim(), gewicht=$('gewicht').value.trim();
+    if(!material && !charge){toast('Заполните Materialnummer или Charge');return;}
+    if(name) localStorage.setItem(NAME_KEY, name);
+    records.push({material,name,charge,gewicht});
     localStorage.setItem(STORAGE_KEY, JSON.stringify(records));
     render();
-    $('material').value = ''; $('charge').value = ''; $('gewicht').value = '';
-    $('material').focus();
-    toast('Запись сохранена ✓');
+    $('material').value='';$('charge').value='';$('gewicht').value='';$('material').focus();
+    toast('Сохранено ✓');
   });
-
   $('list').addEventListener('click', e => {
-    if (e.target.classList.contains('del')) {
-      records.splice(+e.target.dataset.i, 1);
+    if(e.target.classList.contains('del')){
+      records.splice(+e.target.dataset.i,1);
       localStorage.setItem(STORAGE_KEY, JSON.stringify(records));
       render();
     }
   });
-
   $('btnClear').addEventListener('click', () => {
-    if (!records.length || !confirm('Удалить все записи?')) return;
-    records = []; localStorage.removeItem(STORAGE_KEY); render();
-    toast('Удалено');
+    if(!records.length || !confirm('Удалить все записи?')) return;
+    records=[]; localStorage.removeItem(STORAGE_KEY); render(); toast('Удалено');
   });
 
-  // ---------- Экспорт CSV ----------
+  // ---------- CSV ----------
   $('btnExport').addEventListener('click', () => {
-    if (!records.length) { toast('Нет данных'); return; }
-    const rows = ['Materialnummer;Name;Charge;Gewicht'];
-    records.forEach(r => {
-      rows.push([r.material, r.name, r.charge, r.gewicht].map(v => {
-        v = String(v ?? '');
-        return /[;"\n]/.test(v) ? '"' + v.replace(/"/g,'""') + '"' : v;
+    if(!records.length){toast('Нет данных');return;}
+    const rows=['Materialnummer;Name;Charge;Gewicht'];
+    records.forEach(r=>{
+      rows.push([r.material,r.name,r.charge,r.gewicht].map(v=>{
+        v=String(v??''); return /[;"\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v;
       }).join(';'));
     });
-    const csv = '\uFEFF' + rows.join('\n');
-    const filename = 'scan_export_' + new Date().toISOString().slice(0,10) + '.csv';
-    try {
-      const file = new File([csv], filename, { type:'text/csv' });
-      if (navigator.canShare && navigator.canShare({ files:[file] })) {
-        navigator.share({ files:[file], title:'Scan Export' }).catch(()=>downloadFallback(csv,filename));
+    const csv='\uFEFF'+rows.join('\n');
+    const filename='scan_export_'+new Date().toISOString().slice(0,10)+'.csv';
+    try{
+      const file=new File([csv],filename,{type:'text/csv'});
+      if(navigator.canShare && navigator.canShare({files:[file]})){
+        navigator.share({files:[file],title:'Scan Export'}).catch(()=>downloadFallback(csv,filename));
         return;
       }
-    } catch(e){}
-    downloadFallback(csv, filename);
+    }catch(e){}
+    downloadFallback(csv,filename);
   });
-
-  function downloadFallback(csv, filename) {
-    const blob = new Blob([csv], { type:'text/csv;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url; a.download = filename;
+  function downloadFallback(csv,filename){
+    const blob=new Blob([csv],{type:'text/csv;charset=utf-8'});
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement('a'); a.href=url; a.download=filename;
     document.body.appendChild(a); a.click(); document.body.removeChild(a);
-    setTimeout(()=>URL.revokeObjectURL(url), 3000);
-    toast('Файл сохранён');
+    setTimeout(()=>URL.revokeObjectURL(url),3000); toast('Файл сохранён');
   }
 
-  // ---------- Сканирование штрихкода ----------
+  // ---------- Штрихкод ----------
   $('btnScan').addEventListener('click', async () => {
-    if (scanning) { await stopScan(); return; }
-    const reader = $('reader');
-    reader.classList.add('active');
-    $('btnScan').textContent = '⏹ Остановить';
-    try {
-      html5Qr = new Html5Qrcode('reader');
-      await html5Qr.start(
-        { facingMode: 'environment' },
-        { fps:10, qrbox:{ width:280, height:160 } },
-        (text) => {
-          $('charge').value = text;
-          if (navigator.vibrate) navigator.vibrate(60);
-          toast('Штрихкод: ' + text);
-          stopScan();
-        },
-        () => {}
-      );
-      scanning = true;
-    } catch (e) {
-      alert('Ошибка камеры: ' + (e.message || e));
-      stopScan();
-    }
+    if(scanning){await stopScan();return;}
+    const reader=$('reader'); reader.classList.add('active');
+    $('btnScan').textContent='⏹ Остановить';
+    try{
+      html5Qr=new Html5Qrcode('reader');
+      await html5Qr.start({facingMode:'environment'},{fps:10,qrbox:{width:280,height:160}},
+        (text)=>{ $('charge').value=text; if(navigator.vibrate)navigator.vibrate(60); toast('Штрихкод: '+text); stopScan(); },
+        ()=>{});
+      scanning=true;
+    }catch(e){ alert('Ошибка камеры: '+(e.message||e)); stopScan(); }
   });
-
-  async function stopScan() {
-    scanning = false;
-    if (html5Qr) { try { await html5Qr.stop(); await html5Qr.clear(); } catch(e){} html5Qr = null; }
+  async function stopScan(){
+    scanning=false;
+    if(html5Qr){try{await html5Qr.stop();await html5Qr.clear();}catch(e){} html5Qr=null;}
     $('reader').classList.remove('active');
-    $('btnScan').textContent = '▦ Сканировать штрихкод (Charge)';
+    $('btnScan').textContent='▦ Сканировать штрихкод (Charge)';
   }
 
-  // ---------- OCR ----------
+  // ---------- Предобработка изображения ----------
+  function preprocessImage(file, opts = {}) {
+    const upscale     = opts.upscale     || 2;
+    const cropFrom    = opts.cropFrom    ?? 0;      // 0..1 — доля от верха
+    const cropTo      = opts.cropTo      ?? 1;      // 0..1 — доля от верха
+    const contrast    = opts.contrast    ?? 1.6;
+    const threshold   = opts.threshold   ?? 0;      // 0 = без бинаризации
+    const invert      = opts.invert      || false;
+
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => {
+        const srcY = Math.floor(img.height * cropFrom);
+        const srcH = Math.floor(img.height * (cropTo - cropFrom));
+        const srcW = img.width;
+        const w = Math.round(srcW * upscale);
+        const h = Math.round(srcH * upscale);
+
+        const canvas = document.createElement('canvas');
+        canvas.width = w; canvas.height = h;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, srcY, srcW, srcH, 0, 0, w, h);
+
+        const imgData = ctx.getImageData(0, 0, w, h);
+        const d = imgData.data;
+        for (let i = 0; i < d.length; i += 4) {
+          let g = 0.299 * d[i] + 0.587 * d[i+1] + 0.114 * d[i+2];
+          let v = (g - 128) * contrast + 128;
+          if (threshold > 0) v = v > threshold ? 255 : 0;
+          v = Math.max(0, Math.min(255, v));
+          if (invert) v = 255 - v;
+          d[i] = d[i+1] = d[i+2] = v;
+        }
+        ctx.putImageData(imgData, 0, 0);
+        canvas.toBlob(resolve, 'image/png');
+      };
+      img.onerror = reject;
+      img.src = URL.createObjectURL(file);
+    });
+  }
+
+  // ---------- OCR одного изображения ----------
+  async function ocrImage(blob, psm, onProgress) {
+    const worker = await Tesseract.createWorker('deu+eng', 1, {
+      logger: onProgress || (()=>{}),
+      errorHandler: e => console.warn('Tesseract:', e)
+    });
+    await worker.setParameters({
+      tessedit_pageseg_mode: String(psm || 6)
+    });
+    const { data } = await worker.recognize(blob);
+    await worker.terminate();
+    return (data && data.text) || '';
+  }
+
+  // ---------- Основной пайплайн OCR ----------
   async function runOcr(file) {
     if (!file) return;
 
-    const preview = $('preview');
-    preview.src = URL.createObjectURL(file);
-    preview.classList.add('active');
+    $('preview').src = URL.createObjectURL(file);
+    $('preview').classList.add('active');
 
     $('progress').classList.add('active');
-    $('progress').textContent = 'Распознаю… 0%';
+    $('progress').textContent = 'Готовлю изображение…';
     $('btnOcrCamera').disabled = true;
     $('btnOcrGallery').disabled = true;
 
     try {
-      const result = await Tesseract.recognize(file, 'deu+eng', {
-        logger: m => {
-          if (m.status === 'recognizing text') {
-            $('progress').textContent = 'Распознаю… ' + Math.round((m.progress||0)*100) + '%';
-          }
+      // 1) Полное изображение, ч/б + контраст + 2x
+      $('progress').textContent = 'Распознаю (1/2)…';
+      const fullBlob = await preprocessImage(file, { upscale:2, contrast:1.6 });
+      let text = await ocrImage(fullBlob, 6, m => {
+        if (m.status === 'recognizing text') {
+          $('progress').textContent = 'Распознаю (1/2)… ' + Math.round((m.progress||0)*100) + '%';
         }
       });
-      const text = result.data.text || '';
-      console.log('=== OCR RAW TEXT ===\n' + text + '\n===================');
 
-      $('rawText').value = text;
+      let filled = fillFields(text);
+
+      // 2) Если Materialnummer не найден — второй проход по верхней части
+      let topText = '';
+      if (!filled.material) {
+        $('progress').textContent = 'Уточняю верхнюю часть…';
+        const topBlob = await preprocessImage(file, { upscale:3, contrast:1.8, cropFrom:0, cropTo:0.35 });
+        topText = await ocrImage(topBlob, 6, m => {
+          if (m.status === 'recognizing text') {
+            $('progress').textContent = 'Уточняю (2/2)… ' + Math.round((m.progress||0)*100) + '%';
+          }
+        });
+        const mat = extractMaterial(topText);
+        if (mat) {
+          $('material').value = mat;
+          filled.material = true;
+        }
+      }
+
+      // 3) Показываем весь сырой текст
+      let allText = text;
+      if (topText) allText += '\n\n--- TOP CROP (для Materialnummer) ---\n' + topText;
+      $('rawText').value = allText;
       $('rawBox').classList.add('active');
+      console.log('=== RAW OCR ===\n' + allText + '\n===============');
 
-      const filled = fillFields(text);
-      const filledCount = Object.values(filled).filter(Boolean).length;
-
-      if (filledCount === 0) {
+      const count = Object.values(filled).filter(Boolean).length;
+      if (count === 0) {
         toast('Текст распознан, но поля не заполнены — проверьте текст ниже', 4000);
       } else {
-        toast('Заполнено полей: ' + filledCount + ' ✓');
+        toast('Заполнено полей: ' + count + ' ✓');
       }
     } catch (e) {
       console.error(e);
@@ -279,164 +318,98 @@
     }
   }
 
-  // Камера → распознать
   $('btnOcrCamera').addEventListener('click', () => {
     const inp = document.createElement('input');
-    inp.type = 'file';
-    inp.accept = 'image/*';
-    inp.capture = 'environment';
+    inp.type='file'; inp.accept='image/*'; inp.capture='environment';
     inp.onchange = () => runOcr(inp.files && inp.files[0]);
     inp.click();
   });
-
-  // Галерея → распознать
   $('btnOcrGallery').addEventListener('click', () => {
     const inp = document.createElement('input');
-    inp.type = 'file';
-    inp.accept = 'image/*';
+    inp.type='file'; inp.accept='image/*';
     inp.onchange = () => runOcr(inp.files && inp.files[0]);
     inp.click();
   });
 
-  // ---------- Парсинг распознанного текста ----------
-  function fillFields(raw) {
-    const filled = { material:false, name:false, charge:false, gewicht:false };
-
-    // Нормализация
-    let t = raw
-      .replace(/\uFEFF/g, '')
-      .replace(/[Ⓡ©Ⓢ]/g, '®')
-      .replace(/\r/g, '\n');
-
-    const lines   = t.split('\n').map(s => s.trim()).filter(Boolean);
-    const linesUp = lines.map(s => s.toUpperCase());
-
-    // ============================================================
-    // 1) MATERIALNUMMER — только рядом с «PACKSTUCK»
-    // ============================================================
-    // Ищем строку с PACKSTUCK (с учётом типичных ошибок OCR)
+  // ---------- Materialnummer ----------
+  function extractMaterial(text) {
+    const lines = text.split('\n').map(s => s.trim()).filter(Boolean);
     const packRe = /P\s*[AА]\s*C\s*[KК]\s*[\s\-]*S\s*T\s*[UÜUО]\s*C\s*[KК]/i;
 
-    let packIdx = -1;
-    for (let i = 0; i < linesUp.length; i++) {
-      if (packRe.test(linesUp[i])) { packIdx = i; break; }
+    let idx = -1;
+    for (let i = 0; i < lines.length; i++) {
+      if (packRe.test(lines[i])) { idx = i; break; }
     }
 
-    let material = '';
-
-    if (packIdx >= 0) {
-      // Ищем 6-значное число в окне: строка с PACKSTUCK ± 2 строки
-      const start = Math.max(0, packIdx - 2);
-      const end   = Math.min(lines.length - 1, packIdx + 2);
-
-      for (let i = start; i <= end && !material; i++) {
-        const ln = lines[i];
-        const m = ln.match(/(?:^|[^\d])(\d{6})(?!\d)/);
-        if (m) material = m[1];
-      }
-    }
-
-    // Фолбэк 1: до слова CHARGE найти 6-значное число
-    if (!material) {
-      const beforeCharge = t.split(/CHARGEN?/i)[0];
-      const m = beforeCharge.match(/(?:^|[^\d])(\d{6})(?!\d)/);
-      if (m) material = m[1];
-    }
-
-    // Фолбэк 2: самое первое 6-значное число
-    if (!material) {
-      const m = t.match(/(?:^|[^\d])(\d{6})(?!\d)/);
-      if (m) material = m[1];
-    }
-
-    if (material) {
-      $('material').value = material;
-      filled.material = true;
-    }
-
-    // ============================================================
-    // 2) CHARGE — SRxxxxxx или после CHARGEN-NR
-    // ============================================================
-    let charge = '';
-    const chargeCtx = t.match(/CHARGEN?\s*[-\s]*(?:NR\.?)?[:\s]*([A-Z]{1,4}\s?\d{5,10})/i);
-    if (chargeCtx) {
-      charge = chargeCtx[1].replace(/\s/g, '').toUpperCase();
-    } else {
-      const c2 = t.toUpperCase().match(/\b([A-Z]{2}\d{6,8})\b/);
-      if (c2) charge = c2[1];
-    }
-    if (charge) {
-      $('charge').value = charge;
-      filled.charge = true;
-    }
-
-    // ============================================================
-    // 3) GEWICHT — NETTO xxx,xxx KG
-    // ============================================================
-    let gew = '';
-    const up = t.toUpperCase();
-    const netto = up.match(/NETTO[^\d]{0,10}(\d+[.,]\d+)\s*(KG|G)?/);
-    if (netto) {
-      gew = netto[1].replace(',', '.');
-      if (netto[2] === 'G') gew = (parseFloat(gew) / 1000).toFixed(3);
-    } else {
-      const g2 = up.match(/(\d+[.,]\d{2,3})\s*KG/);
-      if (g2) gew = g2[1].replace(',', '.');
-    }
-    if (gew) {
-      $('gewicht').value = gew;
-      filled.gewicht = true;
-    }
-
-    // ============================================================
-    // 4) NAME — строка с ® или известный бренд
-    // ============================================================
-    let name = '';
-
-    // Приоритет 1: строка с ® или ©/Ⓡ
-    for (const ln of lines) {
-      if (/[®©Ⓡ]/.test(ln) && ln.replace(/[®©Ⓡ]/g, '').trim().length > 4) {
-        name = ln; break;
-      }
-    }
-
-    // Приоритет 2: известный бренд
-    if (!name) {
-      const brands = /\b(ELASTOSIL|WACKER|SILICONE|SILICON|TEROSON|LOCTITE|SIKA|DOW|HENKEL|MOMENTIVE)\b/i;
-      for (const ln of lines) {
-        if (brands.test(ln)) { name = ln; break; }
-      }
-    }
-
-    // Приоритет 3: строка с заглавными латинскими буквами + цифрами
-    if (!name) {
-      for (const ln of lines) {
-        const u = ln.toUpperCase();
-        if (u.length >= 6 && u.length <= 40 &&
-            !/CHARGEN|NETTO|PACKSTUCK|WGK|LGK|SBP6|TROCKEN|FEUCHTIG|SCHUTZ|LAGER|ELEKTROST|ANFRAGE|SICHERHEIT|MATERIAL/i.test(u) &&
-            /[A-Z]{4,}/.test(u) &&
-            /\d/.test(u) &&
-            /^[A-Z0-9ÄÖÜ\s\-\.®]+$/.test(u)) {
-          name = ln; break;
+    if (idx >= 0) {
+      // окно ±2 строки
+      for (let off = 0; off <= 2; off++) {
+        for (const dir of [-1, 1]) {
+          const i = idx + dir * off;
+          if (i < 0 || i >= lines.length) continue;
+          const m = lines[i].match(/(?:^|\D)(\d{6})(?!\d)/);
+          if (m) return m[1];
         }
       }
     }
 
+    // Фолбэк: 6-значное число где угодно
+    const m = text.match(/(?:^|\D)(\d{6})(?!\d)/);
+    return m ? m[1] : '';
+  }
+
+  // ---------- Парсинг всего текста ----------
+  function fillFields(raw) {
+    const filled = { material:false, name:false, charge:false, gewicht:false };
+
+    let t = raw.replace(/\uFEFF/g,'').replace(/[Ⓡ©Ⓢ]/g,'®').replace(/\r/g,'\n');
+    const lines = t.split('\n').map(s => s.trim()).filter(Boolean);
+    const up = t.toUpperCase();
+
+    // Materialnummer
+    const mat = extractMaterial(t);
+    if (mat) { $('material').value = mat; filled.material = true; }
+
+    // Charge — по контексту CHARGEN, иначе по шаблону
+    let charge = '';
+    const ctx = t.match(/CHARGEN?[\s\S]{0,25}?([A-Z]{1,4}\s?\d{5,10})/i);
+    if (ctx) charge = ctx[1].replace(/\s/g,'').toUpperCase();
+    if (!charge) {
+      const m = up.match(/\b([A-Z]{2}\d{6,8})\b/);
+      if (m) charge = m[1];
+    }
+    if (charge) { $('charge').value = charge; filled.charge = true; }
+
+    // Gewicht
+    let gew = '';
+    const netto = up.match(/NETTO[^\d]{0,12}(\d+[.,]\d+)\s*(KG|G)?/);
+    if (netto) {
+      gew = netto[1].replace(',', '.');
+      if (netto[2] === 'G') gew = (parseFloat(gew)/1000).toFixed(3);
+    } else {
+      const g2 = up.match(/(\d+[.,]\d{2,3})\s*KG/);
+      if (g2) gew = g2[1].replace(',', '.');
+    }
+    if (gew) { $('gewicht').value = gew; filled.gewicht = true; }
+
+    // Name — строка с ® или известный бренд
+    let name = '';
+    for (const ln of lines) {
+      if (/[®©Ⓡ]/.test(ln) && ln.replace(/[®©Ⓡ]/g,'').trim().length > 4) { name = ln; break; }
+    }
+    if (!name) {
+      const brands = /\b(ELASTOSIL|WACKER|SILICONE|TEROSON|LOCTITE|SIKA|DOW|HENKEL|MOMENTIVE)\b/i;
+      for (const ln of lines) if (brands.test(ln)) { name = ln; break; }
+    }
     if (name) {
-      name = name.replace(/[®©Ⓡ]/g, '').replace(/\s+/g, ' ').trim();
-      if (name.length >= 3) {
-        $('name').value = name;
-        filled.name = true;
-      }
+      name = name.replace(/[®©Ⓡ]/g,'').replace(/\s+/g,' ').trim();
+      if (name.length >= 3) { $('name').value = name; filled.name = true; }
     }
 
-    console.log('Parsed fields:', filled, {
-      material: $('material').value,
-      name:     $('name').value,
-      charge:   $('charge').value,
-      gewicht:  $('gewicht').value
+    console.log('Parsed:', filled, {
+      material: $('material').value, name: $('name').value,
+      charge: $('charge').value, gewicht: $('gewicht').value
     });
-
     return filled;
   }
 
