@@ -44,7 +44,7 @@
 <div class="container">
 
   <div class="card">
-    <div class="tips">💡 Снимайте этикетку прямо, без бликов. Приложение читает только <b>жирный крупный текст</b>.</div>
+    <div class="tips">💡 Снимайте этикетку прямо, без бликов. Читается только <b>жирный крупный текст</b>.</div>
 
     <button class="btn-ocr" id="btnOcrCamera">📷 Фото с камеры → распознать</button>
     <button class="btn-gal" id="btnOcrGallery">🖼 Выбрать фото из галереи</button>
@@ -119,7 +119,7 @@
   }
   function esc(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 
-  // ---------- Сохранение записи ----------
+  // ---------- Сохранение ----------
   $('btnSave').addEventListener('click', () => {
     const material=$('material').value.trim(), name=$('name').value.trim(),
           charge=$('charge').value.trim(), gewicht=$('gewicht').value.trim();
@@ -190,31 +190,26 @@
   }
 
   // ============================================================
-  //  МОРФОЛОГИЧЕСКИЙ ФИЛЬТР: оставляет только жирные штрихи
+  //  МОРФОЛОГИЧЕСКИЙ ФИЛЬТР
   // ============================================================
   function boldFilter(imageData, w, h, iterations) {
     const d = imageData.data;
     const size = w * h;
     let src = new Uint8ClampedArray(size);
     let dst = new Uint8ClampedArray(size);
-
     for (let i = 0, j = 0; i < d.length; i += 4, j++) src[j] = d[i];
 
-    // Эрозия (для чёрного текста = MAX в окне)
     for (let it = 0; it < iterations; it++) {
       for (let y = 0; y < h; y++) {
         const yOff = y * w;
         for (let x = 0; x < w; x++) {
           let maxV = 0;
           for (let dy = -1; dy <= 1; dy++) {
-            const ny = y + dy;
-            if (ny < 0 || ny >= h) continue;
+            const ny = y + dy; if (ny < 0 || ny >= h) continue;
             const rOff = ny * w;
             for (let dx = -1; dx <= 1; dx++) {
-              const nx = x + dx;
-              if (nx < 0 || nx >= w) continue;
-              const v = src[rOff + nx];
-              if (v > maxV) maxV = v;
+              const nx = x + dx; if (nx < 0 || nx >= w) continue;
+              const v = src[rOff + nx]; if (v > maxV) maxV = v;
             }
           }
           dst[yOff + x] = maxV;
@@ -222,22 +217,17 @@
       }
       const tmp = src; src = dst; dst = tmp;
     }
-
-    // Дилатация
     for (let it = 0; it < iterations; it++) {
       for (let y = 0; y < h; y++) {
         const yOff = y * w;
         for (let x = 0; x < w; x++) {
           let minV = 255;
           for (let dy = -1; dy <= 1; dy++) {
-            const ny = y + dy;
-            if (ny < 0 || ny >= h) continue;
+            const ny = y + dy; if (ny < 0 || ny >= h) continue;
             const rOff = ny * w;
             for (let dx = -1; dx <= 1; dx++) {
-              const nx = x + dx;
-              if (nx < 0 || nx >= w) continue;
-              const v = src[rOff + nx];
-              if (v < minV) minV = v;
+              const nx = x + dx; if (nx < 0 || nx >= w) continue;
+              const v = src[rOff + nx]; if (v < minV) minV = v;
             }
           }
           dst[yOff + x] = minV;
@@ -245,7 +235,6 @@
       }
       const tmp = src; src = dst; dst = tmp;
     }
-
     for (let i = 0, j = 0; i < d.length; i += 4, j++) {
       d[i] = d[i+1] = d[i+2] = src[j];
     }
@@ -253,7 +242,7 @@
   }
 
   // ============================================================
-  //  Предобработка: grayscale + контраст + бинаризация + boldFilter
+  //  Предобработка
   // ============================================================
   function preprocessImage(file, opts = {}) {
     const upscale   = opts.upscale   || 2;
@@ -271,7 +260,6 @@
         const srcW = img.width;
         const w = Math.round(srcW * upscale);
         const h = Math.round(srcH * upscale);
-
         const canvas = document.createElement('canvas');
         canvas.width = w; canvas.height = h;
         const ctx = canvas.getContext('2d');
@@ -281,7 +269,6 @@
         const d = imgData.data;
         const N = w * h;
 
-        // Grayscale + контраст
         for (let i = 0; i < d.length; i += 4) {
           let g = 0.299*d[i] + 0.587*d[i+1] + 0.114*d[i+2];
           g = (g - 128) * contrast + 128;
@@ -289,7 +276,6 @@
           d[i] = d[i+1] = d[i+2] = g;
         }
 
-        // Otsu
         if (mode === 'otsu') {
           const hist = new Array(256).fill(0);
           for (let i = 0; i < d.length; i += 4) hist[d[i]]++;
@@ -310,10 +296,7 @@
           }
         }
 
-        // Bold-фильтр
-        if (bold > 0) {
-          boldFilter(imgData, w, h, bold);
-        }
+        if (bold > 0) boldFilter(imgData, w, h, bold);
 
         ctx.putImageData(imgData, 0, 0);
         canvas.toBlob(resolve, 'image/png');
@@ -324,21 +307,25 @@
   }
 
   // ---------- OCR ----------
-  async function ocrImage(blob, psm, onProgress) {
+  async function ocrImage(blob, psm, onProgress, extraParams) {
     const worker = await Tesseract.createWorker('deu', 1, {
       logger: onProgress || (()=>{}),
       errorHandler: e => console.warn('Tesseract:', e)
     });
-    await worker.setParameters({
+    const params = {
       tessedit_pageseg_mode: String(psm || 6),
       preserve_interword_spaces: '1'
-    });
+    };
+    if (extraParams) Object.assign(params, extraParams);
+    await worker.setParameters(params);
     const { data } = await worker.recognize(blob);
     await worker.terminate();
     return (data && data.text) || '';
   }
 
-  // ---------- Основной пайплайн OCR ----------
+  // ============================================================
+  //  OCR: главный пайплайн
+  // ============================================================
   async function runOcr(file) {
     if (!file) return;
 
@@ -351,35 +338,48 @@
     try {
       const variants = [];
 
-      // Проход 1: полное фото без bold
+      // Проход 1: полное фото, grayscale (без бинаризации) — основной
       $('progress').textContent = 'Проход 1/3…';
-      const v1 = await preprocessImage(file, { upscale:2, contrast:1.6, mode:'gray' });
-      variants.push({ name:'full', text: await ocrImage(v1, 6, m => {
+      const v1 = await preprocessImage(file, { upscale:2, contrast:1.5, mode:'gray' });
+      variants.push({ name:'full-gray', text: await ocrImage(v1, 6, m => {
         if (m.status==='recognizing text') $('progress').textContent = 'Проход 1/3… '+Math.round((m.progress||0)*100)+'%';
       })});
 
-      // Проход 2: полное фото + bold-фильтр
+      // Проход 2: полное фото + bold ×2 + Otsu — только жирный текст
       $('progress').textContent = 'Проход 2/3 (только жирный)…';
       const v2 = await preprocessImage(file, { upscale:2, contrast:1.7, bold:2, mode:'otsu' });
       variants.push({ name:'bold-full', text: await ocrImage(v2, 6, m => {
         if (m.status==='recognizing text') $('progress').textContent = 'Проход 2/3… '+Math.round((m.progress||0)*100)+'%';
       })});
 
-      // Проход 3: верх + bold, ×3
-      $('progress').textContent = 'Проход 3/3 (верх, жирный)…';
-      const v3 = await preprocessImage(file, { upscale:3, contrast:1.8, bold:2, cropFrom:0, cropTo:0.4, mode:'otsu' });
-      variants.push({ name:'bold-top', text: await ocrImage(v3, 6, m => {
+      // Проход 3: специализированный для Materialnummer — верхние 15%, ×5, PSM 7, whitelist digits
+      $('progress').textContent = 'Проход 3/3 (Materialnummer)…';
+      const v3blob = await preprocessImage(file, { upscale:5, contrast:1.6, cropFrom:0, cropTo:0.15, mode:'gray' });
+      const v3text = await ocrImage(v3blob, 7, m => {
         if (m.status==='recognizing text') $('progress').textContent = 'Проход 3/3… '+Math.round((m.progress||0)*100)+'%';
-      })});
+      }, { tessedit_char_whitelist: '0123456789 ' });
+      variants.push({ name:'material-line', text: v3text });
 
+      // Показываем всё
       let allText = '';
       variants.forEach(v => { allText += `\n===== ${v.name} =====\n${v.text}\n`; });
       $('rawText').value = allText;
       $('rawBox').classList.add('active');
       console.log('=== RAW OCR ===' + allText);
 
+      // Парсим
       const filled = { material:false, name:false, charge:false, gewicht:false };
-      for (const v of variants) tryFill(v.text, filled);
+
+      // Сначала пробуем специализированный проход для Materialnummer
+      const dedicatedNum = extract6Digits(v3text);
+      if (dedicatedNum) {
+        $('material').value = dedicatedNum;
+        filled.material = true;
+        console.log('Material (dedicated pass):', dedicatedNum);
+      }
+
+      // Остальные поля — из обычных проходов
+      for (const v of variants) tryFill(v.text, filled, v.name);
 
       const count = Object.values(filled).filter(Boolean).length;
       if (count === 0) toast('Не распознано — попробуйте фото лучше', 4000);
@@ -410,13 +410,19 @@
   // ============================================================
   //  ПАРСИНГ
   // ============================================================
-  function tryFill(raw, filled) {
+  function extract6Digits(text) {
+    if (!text) return '';
+    const m = text.match(/(?:^|\D)(\d{6})(?!\d)/);
+    return m ? m[1] : '';
+  }
+
+  function tryFill(raw, filled, passName) {
     if (!raw) return;
     let t = raw.replace(/\uFEFF/g,'').replace(/[Ⓡ©Ⓢ]/g,'®').replace(/\r/g,'\n');
     const lines = t.split('\n').map(s => s.trim()).filter(Boolean);
     const up = t.toUpperCase();
 
-    // Materialnummer — только рядом с PACKSTÜCK
+    // Materialnummer — только если ещё пусто
     if (!filled.material) {
       const m = extractMaterial(t);
       if (m) { $('material').value = m; filled.material = true; }
@@ -461,56 +467,41 @@
       }
     }
 
-    console.log('After pass:', filled, {
+    console.log(`[${passName}] filled:`, JSON.stringify(filled), {
       material:$('material').value, name:$('name').value,
       charge:$('charge').value, gewicht:$('gewicht').value
     });
   }
 
-  // ============================================================
-  //  MATERIALNUMMER — только рядом с PACKSTÜCK
-  // ============================================================
   function extractMaterial(text) {
     const lines = text.split('\n').map(s => s.trim()).filter(Boolean);
-
-    // Регулярка на PACKSTÜCK с допуском на ошибки OCR
-    // (кириллические К, А, О; пропущенные буквы; разные разделители)
     const packRe = /P\s*[AА]\s*C\s*[KК]\s*[\s\-_\.]*S\s*T\s*[UÜUО]\s*C\s*[KК]/i;
 
-    // Ищем строку с PACKSTÜCK
     let packIdx = -1;
     for (let i = 0; i < lines.length; i++) {
       if (packRe.test(lines[i])) { packIdx = i; break; }
     }
-
     if (packIdx >= 0) {
-      // Ищем 6-значное число в окне ±3 строки,
-      // но НЕ на самой строке PACKSTÜCK (там стоит «1-3 Nr. 3»)
       const candidates = [];
       for (let off = 1; off <= 3; off++) {
         for (const dir of [-1, 1]) {
           const i = packIdx + dir * off;
           if (i < 0 || i >= lines.length) continue;
           const m = lines[i].match(/(?:^|[^\d])(\d{6})(?!\d)/);
-          if (m) candidates.push({ value: m[1], dist: off, dir });
+          if (m) candidates.push({ value: m[1], dist: off });
         }
       }
       if (candidates.length) {
-        // Берём ближайшее к PACKSTÜCK
         candidates.sort((a,b) => a.dist - b.dist);
         return candidates[0].value;
       }
     }
-
-    // Если PACKSTÜCK не распознан — берём 6-значное число
-    // ТОЛЬКО из первых 20% строк (верх этикетки)
+    // Фолбэк: первые 20% строк
     const topLimit = Math.max(2, Math.ceil(lines.length * 0.2));
     for (let i = 0; i < topLimit; i++) {
       const m = lines[i].match(/(?:^|[^\d])(\d{6})(?!\d)/);
       if (m) return m[1];
     }
-
-    // Крайний случай: 6 цифр до слова CHARGEN
     const beforeCharge = text.split(/CHARGEN?/i)[0];
     const m = beforeCharge.match(/(?:^|[^\d])(\d{6})(?!\d)/);
     return m ? m[1] : '';
