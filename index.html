@@ -15,7 +15,7 @@
   input[type="text"],input[type="number"]{width:100%;padding:12px;font-size:16px;border:1px solid #d5d9e0;border-radius:8px;background:#fafbfc;outline:none;margin-bottom:12px}
   input:focus{border-color:#0d6efd;background:#fff}
   button{width:100%;padding:14px;font-size:16px;font-weight:600;border:none;border-radius:10px;cursor:pointer;margin-bottom:8px;transition:opacity .15s}
-  button:active{opacity:.75} button:disabled{opacity:.5;cursor:wait}
+  button:active{opacity:.75} button:disabled{opacity:.5}
   .btn-ocr{background:#198754;color:#fff} .btn-gal{background:#20c997;color:#fff}
   .btn-scan{background:#0d6efd;color:#fff} .btn-save{background:#ffc107;color:#212529}
   .btn-export{background:#6f42c1;color:#fff} .btn-clear{background:#e9ecef;color:#495057;font-weight:500}
@@ -44,9 +44,7 @@
 <div class="container">
 
   <div class="card">
-    <div class="tips">
-      💡 Для лучшего распознавания: снимайте этикетку <b>прямо</b>, без бликов и теней. Заполните кадр этикеткой, не отходите далеко.
-    </div>
+    <div class="tips">💡 Снимайте этикетку прямо, без бликов. Приложение читает только <b>жирный крупный текст</b>.</div>
 
     <button class="btn-ocr" id="btnOcrCamera">📷 Фото с камеры → распознать</button>
     <button class="btn-gal" id="btnOcrGallery">🖼 Выбрать фото из галереи</button>
@@ -62,16 +60,16 @@
     </div>
 
     <label>Materialnummer</label>
-    <input type="text" id="material" inputmode="numeric" placeholder="z.B. 201486">
+    <input type="text" id="material" inputmode="numeric" placeholder="201486">
 
     <label>Name</label>
-    <input type="text" id="name" placeholder="z.B. ELASTOSIL M 4601 A">
+    <input type="text" id="name" placeholder="ELASTOSIL M 4601 A">
 
     <label>Charge</label>
-    <input type="text" id="charge" placeholder="z.B. SR104689">
+    <input type="text" id="charge" placeholder="SR104689">
 
     <label>Gewicht (kg)</label>
-    <input type="number" id="gewicht" step="0.001" placeholder="z.B. 300.000">
+    <input type="number" id="gewicht" step="0.001" placeholder="300.000">
 
     <button class="btn-save" id="btnSave">💾 Сохранить запись</button>
   </div>
@@ -121,6 +119,7 @@
   }
   function esc(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 
+  // ---------- Сохранение записи ----------
   $('btnSave').addEventListener('click', () => {
     const material=$('material').value.trim(), name=$('name').value.trim(),
           charge=$('charge').value.trim(), gewicht=$('gewicht').value.trim();
@@ -143,6 +142,7 @@
     records=[]; localStorage.removeItem(STORAGE_KEY); render(); toast('Удалено');
   });
 
+  // ---------- CSV ----------
   $('btnExport').addEventListener('click', () => {
     if(!records.length){toast('Нет данных');return;}
     const rows=['Materialnummer;Name;Charge;Gewicht'];
@@ -190,15 +190,78 @@
   }
 
   // ============================================================
-  //  Улучшенная предобработка
+  //  МОРФОЛОГИЧЕСКИЙ ФИЛЬТР: оставляет только жирные штрихи
+  // ============================================================
+  function boldFilter(imageData, w, h, iterations) {
+    const d = imageData.data;
+    const size = w * h;
+    let src = new Uint8ClampedArray(size);
+    let dst = new Uint8ClampedArray(size);
+
+    for (let i = 0, j = 0; i < d.length; i += 4, j++) src[j] = d[i];
+
+    // Эрозия (для чёрного текста = MAX в окне)
+    for (let it = 0; it < iterations; it++) {
+      for (let y = 0; y < h; y++) {
+        const yOff = y * w;
+        for (let x = 0; x < w; x++) {
+          let maxV = 0;
+          for (let dy = -1; dy <= 1; dy++) {
+            const ny = y + dy;
+            if (ny < 0 || ny >= h) continue;
+            const rOff = ny * w;
+            for (let dx = -1; dx <= 1; dx++) {
+              const nx = x + dx;
+              if (nx < 0 || nx >= w) continue;
+              const v = src[rOff + nx];
+              if (v > maxV) maxV = v;
+            }
+          }
+          dst[yOff + x] = maxV;
+        }
+      }
+      const tmp = src; src = dst; dst = tmp;
+    }
+
+    // Дилатация
+    for (let it = 0; it < iterations; it++) {
+      for (let y = 0; y < h; y++) {
+        const yOff = y * w;
+        for (let x = 0; x < w; x++) {
+          let minV = 255;
+          for (let dy = -1; dy <= 1; dy++) {
+            const ny = y + dy;
+            if (ny < 0 || ny >= h) continue;
+            const rOff = ny * w;
+            for (let dx = -1; dx <= 1; dx++) {
+              const nx = x + dx;
+              if (nx < 0 || nx >= w) continue;
+              const v = src[rOff + nx];
+              if (v < minV) minV = v;
+            }
+          }
+          dst[yOff + x] = minV;
+        }
+      }
+      const tmp = src; src = dst; dst = tmp;
+    }
+
+    for (let i = 0, j = 0; i < d.length; i += 4, j++) {
+      d[i] = d[i+1] = d[i+2] = src[j];
+    }
+    return imageData;
+  }
+
+  // ============================================================
+  //  Предобработка: grayscale + контраст + бинаризация + boldFilter
   // ============================================================
   function preprocessImage(file, opts = {}) {
     const upscale   = opts.upscale   || 2;
     const cropFrom  = opts.cropFrom  ?? 0;
     const cropTo    = opts.cropTo    ?? 1;
     const contrast  = opts.contrast  ?? 1.6;
-    const brightness= opts.brightness ?? 0;
-    const mode      = opts.mode      || 'gray'; // 'gray' | 'otsu' | 'adaptive'
+    const bold      = opts.bold      ?? 0;
+    const mode      = opts.mode      || 'gray';
 
     return new Promise((resolve, reject) => {
       const img = new Image();
@@ -208,26 +271,28 @@
         const srcW = img.width;
         const w = Math.round(srcW * upscale);
         const h = Math.round(srcH * upscale);
-        const c = document.createElement('canvas');
-        c.width = w; c.height = h;
-        const ctx = c.getContext('2d');
+
+        const canvas = document.createElement('canvas');
+        canvas.width = w; canvas.height = h;
+        const ctx = canvas.getContext('2d');
         ctx.drawImage(img, 0, srcY, srcW, srcH, 0, 0, w, h);
 
-        const data = ctx.getImageData(0, 0, w, h);
-        const d = data.data;
+        const imgData = ctx.getImageData(0, 0, w, h);
+        const d = imgData.data;
         const N = w * h;
-        const gray = new Uint8ClampedArray(N);
 
-        for (let i = 0, j = 0; i < d.length; i += 4, j++) {
+        // Grayscale + контраст
+        for (let i = 0; i < d.length; i += 4) {
           let g = 0.299*d[i] + 0.587*d[i+1] + 0.114*d[i+2];
-          g = (g - 128) * contrast + 128 + brightness;
-          gray[j] = Math.max(0, Math.min(255, g));
+          g = (g - 128) * contrast + 128;
+          g = Math.max(0, Math.min(255, g));
+          d[i] = d[i+1] = d[i+2] = g;
         }
 
+        // Otsu
         if (mode === 'otsu') {
-          // Otsu threshold
           const hist = new Array(256).fill(0);
-          for (let i = 0; i < N; i++) hist[gray[i]]++;
+          for (let i = 0; i < d.length; i += 4) hist[d[i]]++;
           let total = N, sum = 0;
           for (let i = 0; i < 256; i++) sum += i * hist[i];
           let sumB = 0, wB = 0, maxVar = 0, thr = 128;
@@ -239,44 +304,26 @@
             const between = wB * wF * (mB - mF) * (mB - mF);
             if (between > maxVar) { maxVar = between; thr = t; }
           }
-          for (let j = 0; j < N; j++) gray[j] = gray[j] > thr ? 255 : 0;
-        } else if (mode === 'adaptive') {
-          // Адаптивная бинаризация (локальное среднее)
-          const win = Math.max(15, Math.floor(w / 20)) | 1;
-          const half = win >> 1;
-          const C = 12;
-          // Примитивный box blur
-          const blurred = new Float32Array(N);
-          for (let y = 0; y < h; y++) {
-            let sum = 0, cnt = 0;
-            for (let x = -half; x <= half; x++) {
-              const xx = Math.min(w - 1, Math.max(0, x));
-              sum += gray[y*w + xx]; cnt++;
-            }
-            for (let x = 0; x < w; x++) {
-              blurred[y*w + x] = sum / cnt;
-              const xAdd = Math.min(w - 1, x + half + 1);
-              const xSub = Math.max(0, x - half);
-              sum += gray[y*w + xAdd] - gray[y*w + xSub];
-            }
+          for (let i = 0; i < d.length; i += 4) {
+            const v = d[i] > thr ? 255 : 0;
+            d[i] = d[i+1] = d[i+2] = v;
           }
-          for (let j = 0; j < N; j++) gray[j] = gray[j] > blurred[j] - C ? 255 : 0;
         }
 
-        for (let i = 0, j = 0; i < d.length; i += 4, j++) {
-          d[i] = d[i+1] = d[i+2] = gray[j];
+        // Bold-фильтр
+        if (bold > 0) {
+          boldFilter(imgData, w, h, bold);
         }
-        ctx.putImageData(data, 0, 0);
-        c.toBlob(resolve, 'image/png');
+
+        ctx.putImageData(imgData, 0, 0);
+        canvas.toBlob(resolve, 'image/png');
       };
       img.onerror = reject;
       img.src = URL.createObjectURL(file);
     });
   }
 
-  // ============================================================
-  //  OCR с заданными параметрами
-  // ============================================================
+  // ---------- OCR ----------
   async function ocrImage(blob, psm, onProgress) {
     const worker = await Tesseract.createWorker('deu', 1, {
       logger: onProgress || (()=>{}),
@@ -291,58 +338,51 @@
     return (data && data.text) || '';
   }
 
-  // ============================================================
-  //  Много-проходный OCR
-  // ============================================================
+  // ---------- Основной пайплайн OCR ----------
   async function runOcr(file) {
     if (!file) return;
 
     $('preview').src = URL.createObjectURL(file);
     $('preview').classList.add('active');
     $('progress').classList.add('active');
-    $('progress').textContent = 'Готовлю изображение…';
     $('btnOcrCamera').disabled = true;
     $('btnOcrGallery').disabled = true;
 
     try {
       const variants = [];
 
-      // Проход 1 — полное изображение, средний контраст
-      $('progress').textContent = 'Проход 1/3 (полное фото)…';
-      const full1 = await preprocessImage(file, { upscale:2, contrast:1.7, mode:'gray' });
-      variants.push({ name:'full-gray', text: await ocrImage(full1, 6, m => {
+      // Проход 1: полное фото без bold
+      $('progress').textContent = 'Проход 1/3…';
+      const v1 = await preprocessImage(file, { upscale:2, contrast:1.6, mode:'gray' });
+      variants.push({ name:'full', text: await ocrImage(v1, 6, m => {
         if (m.status==='recognizing text') $('progress').textContent = 'Проход 1/3… '+Math.round((m.progress||0)*100)+'%';
       })});
 
-      // Проход 2 — верхняя часть, бинаризация Отсу, PSM 6
-      $('progress').textContent = 'Проход 2/3 (верх этикетки)…';
-      const top1 = await preprocessImage(file, { upscale:3, contrast:1.8, cropFrom:0, cropTo:0.35, mode:'otsu' });
-      variants.push({ name:'top-otsu', text: await ocrImage(top1, 6, m => {
+      // Проход 2: полное фото + bold-фильтр
+      $('progress').textContent = 'Проход 2/3 (только жирный)…';
+      const v2 = await preprocessImage(file, { upscale:2, contrast:1.7, bold:2, mode:'otsu' });
+      variants.push({ name:'bold-full', text: await ocrImage(v2, 6, m => {
         if (m.status==='recognizing text') $('progress').textContent = 'Проход 2/3… '+Math.round((m.progress||0)*100)+'%';
       })});
 
-      // Проход 3 — верхняя часть, адаптивная бинаризация, PSM 11 (разрозненный текст)
-      $('progress').textContent = 'Проход 3/3 (верх, adaptive)…';
-      const top2 = await preprocessImage(file, { upscale:3, contrast:2.0, cropFrom:0, cropTo:0.32, mode:'adaptive' });
-      variants.push({ name:'top-adapt', text: await ocrImage(top2, 11, m => {
+      // Проход 3: верх + bold, ×3
+      $('progress').textContent = 'Проход 3/3 (верх, жирный)…';
+      const v3 = await preprocessImage(file, { upscale:3, contrast:1.8, bold:2, cropFrom:0, cropTo:0.4, mode:'otsu' });
+      variants.push({ name:'bold-top', text: await ocrImage(v3, 6, m => {
         if (m.status==='recognizing text') $('progress').textContent = 'Проход 3/3… '+Math.round((m.progress||0)*100)+'%';
       })});
 
-      // Собираем весь текст для показа
       let allText = '';
       variants.forEach(v => { allText += `\n===== ${v.name} =====\n${v.text}\n`; });
       $('rawText').value = allText;
       $('rawBox').classList.add('active');
-      console.log('=== RAW OCR (all passes) ===' + allText);
+      console.log('=== RAW OCR ===' + allText);
 
-      // Пытаемся заполнить поля по каждому проходу, объединяем
       const filled = { material:false, name:false, charge:false, gewicht:false };
-      for (const v of variants) {
-        tryFill(v.text, filled);
-      }
+      for (const v of variants) tryFill(v.text, filled);
 
       const count = Object.values(filled).filter(Boolean).length;
-      if (count === 0) toast('Ничего не удалось распознать — попробуйте фото получше', 4000);
+      if (count === 0) toast('Не распознано — попробуйте фото лучше', 4000);
       else toast('Заполнено полей: ' + count + ' ✓');
     } catch (e) {
       console.error(e);
@@ -368,7 +408,7 @@
   });
 
   // ============================================================
-  //  Парсинг — пытается заполнить только пустые поля
+  //  ПАРСИНГ
   // ============================================================
   function tryFill(raw, filled) {
     if (!raw) return;
@@ -376,7 +416,7 @@
     const lines = t.split('\n').map(s => s.trim()).filter(Boolean);
     const up = t.toUpperCase();
 
-    // Materialnummer
+    // Materialnummer — только рядом с PACKSTÜCK
     if (!filled.material) {
       const m = extractMaterial(t);
       if (m) { $('material').value = m; filled.material = true; }
@@ -427,25 +467,52 @@
     });
   }
 
+  // ============================================================
+  //  MATERIALNUMMER — только рядом с PACKSTÜCK
+  // ============================================================
   function extractMaterial(text) {
     const lines = text.split('\n').map(s => s.trim()).filter(Boolean);
-    const packRe = /P\s*[AА]\s*C\s*[KК]\s*[\s\-]*S\s*T\s*[UÜUО]\s*C\s*[KК]/i;
 
-    let idx = -1;
+    // Регулярка на PACKSTÜCK с допуском на ошибки OCR
+    // (кириллические К, А, О; пропущенные буквы; разные разделители)
+    const packRe = /P\s*[AА]\s*C\s*[KК]\s*[\s\-_\.]*S\s*T\s*[UÜUО]\s*C\s*[KК]/i;
+
+    // Ищем строку с PACKSTÜCK
+    let packIdx = -1;
     for (let i = 0; i < lines.length; i++) {
-      if (packRe.test(lines[i])) { idx = i; break; }
+      if (packRe.test(lines[i])) { packIdx = i; break; }
     }
-    if (idx >= 0) {
-      for (let off = 0; off <= 3; off++) {
+
+    if (packIdx >= 0) {
+      // Ищем 6-значное число в окне ±3 строки,
+      // но НЕ на самой строке PACKSTÜCK (там стоит «1-3 Nr. 3»)
+      const candidates = [];
+      for (let off = 1; off <= 3; off++) {
         for (const dir of [-1, 1]) {
-          const i = idx + dir * off;
+          const i = packIdx + dir * off;
           if (i < 0 || i >= lines.length) continue;
-          const m = lines[i].match(/(?:^|\D)(\d{6})(?!\d)/);
-          if (m) return m[1];
+          const m = lines[i].match(/(?:^|[^\d])(\d{6})(?!\d)/);
+          if (m) candidates.push({ value: m[1], dist: off, dir });
         }
       }
+      if (candidates.length) {
+        // Берём ближайшее к PACKSTÜCK
+        candidates.sort((a,b) => a.dist - b.dist);
+        return candidates[0].value;
+      }
     }
-    const m = text.match(/(?:^|\D)(\d{6})(?!\d)/);
+
+    // Если PACKSTÜCK не распознан — берём 6-значное число
+    // ТОЛЬКО из первых 20% строк (верх этикетки)
+    const topLimit = Math.max(2, Math.ceil(lines.length * 0.2));
+    for (let i = 0; i < topLimit; i++) {
+      const m = lines[i].match(/(?:^|[^\d])(\d{6})(?!\d)/);
+      if (m) return m[1];
+    }
+
+    // Крайний случай: 6 цифр до слова CHARGEN
+    const beforeCharge = text.split(/CHARGEN?/i)[0];
+    const m = beforeCharge.match(/(?:^|[^\d])(\d{6})(?!\d)/);
     return m ? m[1] : '';
   }
 
