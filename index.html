@@ -51,12 +51,10 @@
   <div id="jsError"></div>
 
   <div class="card">
-    <div class="tips">💡 Наведите камеру на штрихкод — все поля заполнятся автоматически.</div>
+    <div class="tips">💡 Наведите камеру на <b>верхний</b> штрихкод (там, где Materialnummer/Charge). Нижний игнорируется.</div>
 
     <button class="btn-scan" id="btnScan">📹 Сканировать штрихкод камерой</button>
     <button class="btn-barcode-photo" id="btnBarcodeFromPhoto">▦ Прочитать штрихкод с фото</button>
-    <button class="btn-ocr" id="btnOcrCamera">📷 OCR с камеры (если штрихкод не читается)</button>
-    <button class="btn-gal" id="btnOcrGallery">🖼 OCR из галереи</button>
 
     <div id="reader"></div>
     <img id="preview" alt="">
@@ -68,7 +66,7 @@
     </div>
 
     <div id="rawBox">
-      <label>OCR текст:</label>
+      <label>Распознанный текст (OCR):</label>
       <textarea id="rawText" readonly></textarea>
     </div>
 
@@ -102,84 +100,49 @@
 
 <div class="toast" id="toast"></div>
 
-<!-- Скрипты с onerror — если CDN не загрузится, мы увидим -->
 <script>
-  window.__errors = [];
   window.addEventListener('error', function(e) {
-    var msg = e.message || (e.error && e.error.message) || 'Неизвестная ошибка';
-    window.__errors.push(msg);
     var box = document.getElementById('jsError');
     if (box) {
       box.style.display = 'block';
-      box.textContent = '⚠ Ошибка: ' + msg;
+      box.textContent = '⚠ Ошибка: ' + (e.message || 'Неизвестная');
     }
-    console.error('JS Error:', e);
   });
 </script>
 
-<script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js" onerror="alert('Не загрузился html5-qrcode. Проверьте интернет.')"></script>
-<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js" onerror="alert('Не загрузился Tesseract. Проверьте интернет.')"></script>
+<script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js" onerror="alert('Не загрузился html5-qrcode')"></script>
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js" onerror="alert('Не загрузился Tesseract')"></script>
 
 <script>
-// ============================================================
-//  Безопасная инициализация
-// ============================================================
 (function () {
   'use strict';
 
-  // --- Безопасные хелперы ---
   function $(id) { return document.getElementById(id); }
-
   function on(id, evt, handler) {
     var el = document.getElementById(id);
-    if (!el) {
-      console.warn('Element not found, skipping handler:', id);
-      return null;
-    }
+    if (!el) return null;
     el.addEventListener(evt, handler);
     return el;
   }
+  function setVal(id, val) { var el = $(id); if (el) el.value = val; }
+  function getVal(id) { var el = $(id); return el ? el.value : ''; }
+  function show(id) { var el = $(id); if (el) el.classList.add('active'); }
 
-  function setVal(id, val) {
-    var el = document.getElementById(id);
-    if (el) el.value = val;
-  }
-  function getVal(id) {
-    var el = document.getElementById(id);
-    return el ? el.value : '';
-  }
-  function show(id) {
-    var el = document.getElementById(id);
-    if (el) el.classList.add('active');
-  }
-  function showBlock(id) {
-    var el = document.getElementById(id);
-    if (el) el.style.display = 'block';
-  }
-
-  // --- Состояние ---
   var records = [];
-  try {
-    records = JSON.parse(localStorage.getItem('etiketten_records') || '[]');
-  } catch (e) {
-    records = [];
-  }
-
+  try { records = JSON.parse(localStorage.getItem('etiketten_records') || '[]'); } catch (e) { records = []; }
   var html5Qr = null;
   var scanning = false;
 
-  // --- Справочник продуктов ---
-  // Добавьте сюда свои продукты: Materialnummer → { name, gewicht }
+  // ============================================================
+  //  СПРАВОЧНИК ПРОДУКТОВ
+  // ============================================================
   var CATALOG = {
     '201486': { name: 'ELASTOSIL M 4601 A', gewicht: '300.000' }
-    // '305123': { name: '...', gewicht: '25.000' },
   };
 
-  // --- Восстановление имени ---
   var savedName = localStorage.getItem('etiketten_last_name') || '';
   setVal('name', savedName);
 
-  // --- Toast ---
   var toastTimer;
   function toast(msg, ms) {
     ms = ms || 2500;
@@ -191,14 +154,12 @@
     toastTimer = setTimeout(function(){ t.classList.remove('show'); }, ms);
   }
 
-  // --- Экранирование ---
   function esc(s) {
     return String(s).replace(/[&<>"']/g, function(c){
       return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];
     });
   }
 
-  // --- Отрисовка списка записей ---
   function render() {
     var list = $('list');
     var counter = $('counter');
@@ -222,6 +183,35 @@
   }
 
   // ============================================================
+  //  ПРОВЕРКА: ПОДХОДИТ ЛИ ШТРИХКОД
+  //  Формат: 00NNNNNN/SRxxxxxx (и похожие варианты)
+  // ============================================================
+  function isValidBarcode(raw) {
+    if (!raw) return false;
+    var s = String(raw).trim();
+
+    // Нижний штрихкод на этикетке — длинное число из 10+ цифр БЕЗ букв и слэшей
+    // Отвергаем всё, что состоит только из цифр и длиннее 8 знаков
+    if (/^\d{9,}$/.test(s)) return false;
+
+    // 1) 00NNNNNN/SRxxxxxx
+    if (/^\d{4,10}\s*[\/\\\-]\s*[A-Z]{1,4}\s*\d{5,10}$/i.test(s)) return true;
+
+    // 2) просто SRxxxxxx
+    if (/^[A-Z]{1,4}\d{5,10}$/i.test(s)) return true;
+
+    // 3) GS1-128 (есть скобки или длинные AI-структуры)
+    if (/\(\d{2,4}\)/.test(s)) return true;
+    if (/\x1D/.test(s)) return true;
+
+    // 4) Любая строка, где есть SR + цифры
+    if (/S[RB]?\s?\d{6,8}/i.test(s)) return true;
+
+    // Всё остальное отвергаем
+    return false;
+  }
+
+  // ============================================================
   //  СОХРАНЕНИЕ
   // ============================================================
   on('btnSave', 'click', function () {
@@ -229,26 +219,20 @@
     var name = getVal('name').trim();
     var charge = getVal('charge').trim();
     var gewicht = getVal('gewicht').trim();
-
     if (!material && !charge) { toast('Заполните Materialnummer или Charge'); return; }
     if (name) localStorage.setItem('etiketten_last_name', name);
-
     records.push({ material: material, name: name, charge: charge, gewicht: gewicht });
     localStorage.setItem('etiketten_records', JSON.stringify(records));
     render();
-
-    setVal('material', '');
-    setVal('charge', '');
-    setVal('gewicht', '');
-    var matEl = $('material');
-    if (matEl) matEl.focus();
+    setVal('material', ''); setVal('charge', ''); setVal('gewicht', '');
+    var matEl = $('material'); if (matEl) matEl.focus();
     toast('Сохранено ✓');
   });
 
   on('list', 'click', function (e) {
-    var target = e.target;
-    if (target && target.classList && target.classList.contains('del')) {
-      var idx = parseInt(target.dataset.i, 10);
+    var t = e.target;
+    if (t && t.classList && t.classList.contains('del')) {
+      var idx = parseInt(t.dataset.i, 10);
       if (!isNaN(idx)) {
         records.splice(idx, 1);
         localStorage.setItem('etiketten_records', JSON.stringify(records));
@@ -280,7 +264,6 @@
     });
     var csv = '\uFEFF' + rows.join('\n');
     var filename = 'scan_export_' + new Date().toISOString().slice(0, 10) + '.csv';
-
     try {
       var file = new File([csv], filename, { type: 'text/csv' });
       if (navigator.canShare && navigator.canShare({ files: [file] })) {
@@ -289,7 +272,6 @@
         return;
       }
     } catch (e) {}
-
     downloadFallback(csv, filename);
   });
 
@@ -297,11 +279,8 @@
     var blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
     var url = URL.createObjectURL(blob);
     var a = document.createElement('a');
-    a.href = url;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
+    a.href = url; a.download = filename;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
     setTimeout(function () { URL.revokeObjectURL(url); }, 3000);
     toast('Файл сохранён');
   }
@@ -320,60 +299,149 @@
     inp.click();
   });
 
-  function scanBarcodeFromImage(file) {
+  function scaleImage(file, scale) {
+    return new Promise(function (resolve, reject) {
+      var img = new Image();
+      img.onload = function () {
+        try {
+          var w = Math.round(img.width * scale);
+          var h = Math.round(img.height * scale);
+          var maxSide = 4000;
+          if (w > maxSide || h > maxSide) {
+            var ratio = Math.min(maxSide / w, maxSide / h);
+            w = Math.round(w * ratio);
+            h = Math.round(h * ratio);
+          }
+          var canvas = document.createElement('canvas');
+          canvas.width = w; canvas.height = h;
+          var ctx = canvas.getContext('2d');
+          ctx.imageSmoothingEnabled = true;
+          ctx.imageSmoothingQuality = 'high';
+          ctx.drawImage(img, 0, 0, w, h);
+          canvas.toBlob(function (blob) {
+            if (blob) resolve(blob);
+            else reject(new Error('Не удалось создать изображение'));
+          }, 'image/png');
+        } catch (e) { reject(e); }
+      };
+      img.onerror = function () { reject(new Error('Не удалось открыть файл')); };
+      img.src = URL.createObjectURL(file);
+    });
+  }
+
+  // Вернёт массив результатов (может быть несколько штрихкодов на фото)
+  function scanAllBarcodesInBlob(blob) {
+    return new Promise(function (resolve, reject) {
+      var tempDiv = document.createElement('div');
+      tempDiv.id = 'reader-temp-' + Date.now() + '-' + Math.random();
+      tempDiv.style.position = 'fixed';
+      tempDiv.style.left = '-10000px';
+      tempDiv.style.top = '0';
+      tempDiv.style.width = '400px';
+      tempDiv.style.height = '300px';
+      document.body.appendChild(tempDiv);
+
+      var scanner;
+      try {
+        scanner = new Html5Qrcode(tempDiv.id, { verbose: false, formatsToSupport: [
+          Html5QrcodeSupportedFormats.CODE_128,
+          Html5QrcodeSupportedFormats.CODE_39,
+          Html5QrcodeSupportedFormats.EAN_13,
+          Html5QrcodeSupportedFormats.EAN_8,
+          Html5QrcodeSupportedFormats.UPC_A,
+          Html5QrcodeSupportedFormats.UPC_E,
+          Html5QrcodeSupportedFormats.ITF,
+          Html5QrcodeSupportedFormats.QR_CODE
+        ]});
+      } catch (e) {
+        if (tempDiv.parentNode) tempDiv.parentNode.removeChild(tempDiv);
+        reject(e);
+        return;
+      }
+
+      var fileForScanner;
+      try {
+        fileForScanner = new File([blob], 'scan.png', { type: 'image/png' });
+      } catch (e) { fileForScanner = blob; }
+
+      scanner.scanFile(fileForScanner, false)
+        .then(function (result) {
+          if (tempDiv.parentNode) tempDiv.parentNode.removeChild(tempDiv);
+          resolve([result]);
+        })
+        .catch(function (err) {
+          if (tempDiv.parentNode) tempDiv.parentNode.removeChild(tempDiv);
+          reject(err);
+        });
+    });
+  }
+
+  async function scanBarcodeFromImage(file) {
     var preview = $('preview');
-    if (preview) {
-      preview.src = URL.createObjectURL(file);
-      preview.classList.add('active');
-    }
+    if (preview) { preview.src = URL.createObjectURL(file); preview.classList.add('active'); }
     var prog = $('progress');
-    if (prog) {
-      prog.classList.add('active');
-      prog.textContent = 'Ищу штрихкод на фото…';
-    }
+    if (prog) { prog.classList.add('active'); prog.textContent = 'Ищу штрихкод…'; }
     var btn = $('btnBarcodeFromPhoto');
     if (btn) btn.disabled = true;
 
-    // Создаём временный контейнер (вне экрана) — чтобы точно был виден для html5-qrcode
-    var tempDiv = document.createElement('div');
-    tempDiv.id = 'reader-temp-' + Date.now();
-    tempDiv.style.position = 'fixed';
-    tempDiv.style.left = '-10000px';
-    tempDiv.style.top = '0';
-    tempDiv.style.width = '300px';
-    tempDiv.style.height = '200px';
-    document.body.appendChild(tempDiv);
+    var attempts = [
+      { scale: 1,   label: 'оригинал' },
+      { scale: 1.5, label: '×1.5' },
+      { scale: 2,   label: '×2' },
+      { scale: 3,   label: '×3' }
+    ];
 
-    try {
-      var scanner = new Html5Qrcode(tempDiv.id, { verbose: false });
+    var lastError = null;
+    var ignoredBarcodes = [];
 
-      scanner.scanFile(file, false)
-        .then(function (result) {
+    for (var i = 0; i < attempts.length; i++) {
+      var a = attempts[i];
+      if (prog) prog.textContent = 'Попытка ' + (i+1) + '/' + attempts.length + ' (' + a.label + ')…';
+
+      try {
+        var blob = (a.scale === 1) ? file : await scaleImage(file, a.scale);
+        var results = await scanAllBarcodesInBlob(blob);
+
+        // Среди результатов ищем подходящий
+        var found = null;
+        for (var j = 0; j < results.length; j++) {
+          if (isValidBarcode(results[j])) { found = results[j]; break; }
+          else ignoredBarcodes.push(results[j]);
+        }
+
+        if (found) {
           var bct = $('bcText');
-          if (bct) bct.value = result;
+          if (bct) bct.value = found;
           show('bcBox');
-          parseBarcode(result);
-          toast('Штрихкод прочитан ✓');
-        })
-        .catch(function (err) {
-          console.error('scanFile error:', err);
-          var bct = $('bcText');
-          if (bct) bct.value = 'Не удалось прочитать: ' + (err && err.message ? err.message : err);
-          show('bcBox');
-          toast('Штрихкод не найден на фото', 3500);
-        })
-        .finally(function () {
+          parseBarcode(found);
+          toast('Штрихкод прочитан ✓ (' + a.label + ')');
           if (prog) prog.classList.remove('active');
           if (btn) btn.disabled = false;
-          if (tempDiv.parentNode) tempDiv.parentNode.removeChild(tempDiv);
-        });
-    } catch (e) {
-      console.error('scanner creation error:', e);
-      alert('Ошибка запуска сканера: ' + (e.message || e));
-      if (prog) prog.classList.remove('active');
-      if (btn) btn.disabled = false;
-      if (tempDiv.parentNode) tempDiv.parentNode.removeChild(tempDiv);
+          return;
+        }
+        // Если нашли только нижний штрихкод — продолжаем пробовать другие масштабы
+      } catch (err) {
+        lastError = err;
+      }
     }
+
+    // Ничего подходящего не нашли
+    var bct = $('bcText');
+    if (bct) {
+      var msg = 'Подходящий штрихкод не найден.';
+      if (ignoredBarcodes.length) {
+        msg += '\n\nПрочитаны, но проигнорированы (нижние коды):\n' + ignoredBarcodes.join('\n');
+        msg += '\n\nНужен ВЕРХНИЙ штрихкод (формат 00NNNNNN/SRxxxxxx).';
+      } else {
+        msg += '\n\nПопробуйте:\n• сфотографировать этикетку крупнее\n• обрезать фото, оставив только верхний штрихкод\n• улучшить освещение';
+        if (lastError) msg += '\n\nОшибка: ' + (lastError.message || lastError);
+      }
+      bct.value = msg;
+    }
+    show('bcBox');
+    toast('Нужен верхний штрихкод (с SR)', 4000);
+    if (prog) prog.classList.remove('active');
+    if (btn) btn.disabled = false;
   }
 
   // ============================================================
@@ -382,39 +450,33 @@
   function parseBarcode(raw) {
     if (!raw) return;
     raw = String(raw).trim();
-
     var bct = $('bcText');
     if (bct) bct.value = raw;
     show('bcBox');
 
-    // Формат 1: 00NNNNNN/SRxxxxxx
+    // Формат: 00NNNNNN/SRxxxxxx
     var m = raw.match(/^(\d+)\s*[\/\\\-]\s*([A-Z]{1,4}\s*\d{5,10})$/i);
-    if (m) {
-      fillFromCustomFormat(m[1], m[2]);
-      return;
-    }
+    if (m) { fillFromCustomFormat(m[1], m[2]); return; }
 
-    // Формат 2: только SRxxxxxx
+    // Только SRxxxxxx
     m = raw.match(/^([A-Z]{1,4}\d{5,10})$/i);
     if (m) {
       setVal('charge', m[1].toUpperCase());
-      toast('Только Charge — остальное введите вручную');
+      toast('Только Charge — остальное вручную');
       return;
     }
 
-    // Формат 3: GS1-128
+    // GS1-128
     if (parseGS1(raw)) return;
 
-    // Формат 4: что-нибудь найдём
+    // Поиск SR внутри
     var sr = raw.toUpperCase().match(/S[RB]?\s?(\d{6,8})/);
     if (sr) setVal('charge', 'SR' + sr[1]);
-
     var m6 = raw.match(/(?:^|[^\d])(\d{6})(?!\d)/);
     if (m6) {
       setVal('material', m6[1]);
       fillFromCatalog(m6[1]);
     }
-
     toast('Разобрано частично');
   }
 
@@ -425,7 +487,6 @@
       if (m6) material = m6[1];
     }
     var charge = chargeRaw.replace(/\s/g, '').toUpperCase();
-
     setVal('material', material);
     setVal('charge', charge);
     fillFromCatalog(material);
@@ -446,39 +507,20 @@
       .replace(/<GS>/gi, '|')
       .replace(/\((\d{2,4})\)/g, '|$1|')
       .replace(/\s+/g, ' ');
-
     if (!/\|?\d{2,4}[|\s]/.test(s)) return false;
-
-    var result = {};
-    var m;
-
-    m = s.match(/(?:^|\|)01[|\s]?(\d{14})/);
-    if (m) result.gtin = m[1];
-
-    m = s.match(/(?:^|\|)10[|\s]?([^|\s]{1,20})/);
-    if (m) result.charge = m[1].toUpperCase();
-
-    m = s.match(/(?:^|\|)3103[|\s]?(\d{6})/);
-    if (m) result.gewicht = (parseInt(m[1], 10) / 1000).toFixed(3);
-
-    m = s.match(/(?:^|\|)3102[|\s]?(\d{5})/);
-    if (m && !result.gewicht) result.gewicht = (parseInt(m[1], 10) / 100).toFixed(3);
-
+    var result = {}, m;
+    m = s.match(/(?:^|\|)01[|\s]?(\d{14})/); if (m) result.gtin = m[1];
+    m = s.match(/(?:^|\|)10[|\s]?([^|\s]{1,20})/); if (m) result.charge = m[1].toUpperCase();
+    m = s.match(/(?:^|\|)3103[|\s]?(\d{6})/); if (m) result.gewicht = (parseInt(m[1],10)/1000).toFixed(3);
+    m = s.match(/(?:^|\|)3102[|\s]?(\d{5})/); if (m && !result.gewicht) result.gewicht = (parseInt(m[1],10)/100).toFixed(3);
     if (!result.charge && !result.gtin && !result.gewicht) return false;
-
     if (result.gtin) {
       var mat = result.gtin.replace(/^0+/, '');
       var m6 = mat.match(/(\d{6})$/);
-      if (m6) {
-        setVal('material', m6[1]);
-        fillFromCatalog(m6[1]);
-      }
+      if (m6) { setVal('material', m6[1]); fillFromCatalog(m6[1]); }
     }
-    if (result.charge && !getVal('charge')) {
-      setVal('charge', 'SR' + result.charge.replace(/^SR/i, ''));
-    }
+    if (result.charge && !getVal('charge')) setVal('charge', 'SR' + result.charge.replace(/^SR/i,''));
     if (result.gewicht && !getVal('gewicht')) setVal('gewicht', result.gewicht);
-
     toast('GS1-128 разобран ✓');
     return true;
   }
@@ -491,44 +533,53 @@
     var reader = $('reader');
     var btn = $('btnScan');
     if (!reader || !btn) return;
-
     reader.classList.add('active');
     btn.textContent = '⏹ Остановить';
-
     try {
       html5Qr = new Html5Qrcode('reader');
       html5Qr.start(
         { facingMode: 'environment' },
-        { fps: 10, qrbox: { width: 300, height: 180 } },
+        {
+          fps: 10,
+          qrbox: { width: 300, height: 180 },
+          formatsToSupport: [
+            Html5QrcodeSupportedFormats.CODE_128,
+            Html5QrcodeSupportedFormats.CODE_39,
+            Html5QrcodeSupportedFormats.EAN_13,
+            Html5QrcodeSupportedFormats.EAN_8,
+            Html5QrcodeSupportedFormats.UPC_A,
+            Html5QrcodeSupportedFormats.UPC_E,
+            Html5QrcodeSupportedFormats.ITF,
+            Html5QrcodeSupportedFormats.QR_CODE
+          ]
+        },
         function (text) {
+          // Игнорируем невалидные штрихкоды, продолжаем сканировать
+          if (!isValidBarcode(text)) {
+            console.log('Игнорирую невалидный штрихкод:', text);
+            if (navigator.vibrate) navigator.vibrate(30);
+            return;
+          }
+          // Валидный — обрабатываем
           var bct = $('bcText');
           if (bct) bct.value = text;
           show('bcBox');
           parseBarcode(text);
-          if (navigator.vibrate) navigator.vibrate(80);
+          if (navigator.vibrate) navigator.vibrate(100);
           stopScan();
         },
         function () {}
-      ).then(function () {
-        scanning = true;
-      }).catch(function (e) {
-        alert('Ошибка камеры: ' + (e.message || e));
-        stopScan();
-      });
-    } catch (e) {
-      alert('Ошибка запуска: ' + (e.message || e));
-      stopScan();
-    }
+      ).then(function () { scanning = true; })
+       .catch(function (e) { alert('Ошибка камеры: ' + (e.message || e)); stopScan(); });
+    } catch (e) { alert('Ошибка: ' + (e.message || e)); stopScan(); }
   });
 
   function stopScan() {
     scanning = false;
     if (html5Qr) {
-      html5Qr.stop().then(function () {
-        return html5Qr.clear();
-      }).catch(function () {}).finally(function () {
-        html5Qr = null;
-      });
+      html5Qr.stop().then(function () { return html5Qr.clear(); })
+        .catch(function () {})
+        .finally(function () { html5Qr = null; });
     }
     var reader = $('reader');
     if (reader) reader.classList.remove('active');
@@ -536,198 +587,7 @@
     if (btn) btn.textContent = '📹 Сканировать штрихкод камерой';
   }
 
-  // ============================================================
-  //  OCR (упрощённый — если штрихкод не читается)
-  // ============================================================
-  on('btnOcrCamera', 'click', function () {
-    var inp = document.createElement('input');
-    inp.type = 'file';
-    inp.accept = 'image/*';
-    inp.capture = 'environment';
-    inp.onchange = function () {
-      if (inp.files && inp.files[0]) runOcr(inp.files[0]);
-    };
-    inp.click();
-  });
-
-  on('btnOcrGallery', 'click', function () {
-    var inp = document.createElement('input');
-    inp.type = 'file';
-    inp.accept = 'image/*';
-    inp.onchange = function () {
-      if (inp.files && inp.files[0]) runOcr(inp.files[0]);
-    };
-    inp.click();
-  });
-
-  function runOcr(file) {
-    if (!file) return;
-
-    var preview = $('preview');
-    if (preview) {
-      preview.src = URL.createObjectURL(file);
-      preview.classList.add('active');
-    }
-    var prog = $('progress');
-    if (prog) {
-      prog.classList.add('active');
-      prog.textContent = 'Распознаю…';
-    }
-
-    if (typeof Tesseract === 'undefined') {
-      alert('Tesseract.js не загружен. Проверьте интернет.');
-      if (prog) prog.classList.remove('active');
-      return;
-    }
-
-    Tesseract.recognize(file, 'deu', {
-      logger: function (m) {
-        if (m && m.status === 'recognizing text' && prog) {
-          prog.textContent = 'Распознаю… ' + Math.round((m.progress || 0) * 100) + '%';
-        }
-      }
-    }).then(function (result) {
-      var text = (result && result.data && result.data.text) ? result.data.text : '';
-      var rt = $('rawText');
-      if (rt) rt.value = text;
-      show('rawBox');
-
-      // Materialnummer
-      if (!getVal('material')) {
-        var mat = extractMaterial(text) || extract6Digits(text);
-        if (mat) {
-          setVal('material', mat);
-          fillFromCatalog(mat);
-        }
-      }
-      // Charge
-      if (!getVal('charge')) {
-        var ch = extractCharge(text);
-        if (ch) setVal('charge', ch);
-      }
-      // Gewicht
-      if (!getVal('gewicht')) {
-        var g = extractGewicht(text);
-        if (g) setVal('gewicht', g);
-      }
-      // Name
-      if (!getVal('name').trim()) {
-        var nm = extractName(text);
-        if (nm) setVal('name', nm);
-      }
-
-      toast('OCR обработан');
-    }).catch(function (e) {
-      console.error(e);
-      alert('Ошибка OCR: ' + (e.message || e));
-    }).finally(function () {
-      if (prog) prog.classList.remove('active');
-    });
-  }
-
-  // ============================================================
-  //  Извлечение из OCR
-  // ============================================================
-  function extract6Digits(text) {
-    if (typeof text !== 'string') return '';
-    var m = text.match(/(?:^|\D)(\d{6})(?!\d)/);
-    return m ? m[1] : '';
-  }
-
-  function extractMaterial(text) {
-    if (typeof text !== 'string') return '';
-    var lines = text.split('\n').map(function(s){return s.trim();}).filter(Boolean);
-    var packRe = /P\s*[AА]\s*C\s*[KК]\s*[\s\-_\.]*S\s*T\s*[UÜUО]\s*C\s*[KК]/i;
-    var packIdx = -1;
-    for (var i = 0; i < lines.length; i++) {
-      if (packRe.test(lines[i])) { packIdx = i; break; }
-    }
-    if (packIdx >= 0) {
-      var candidates = [];
-      for (var off = 1; off <= 3; off++) {
-        for (var d = -1; d <= 1; d += 2) {
-          var idx = packIdx + d * off;
-          if (idx < 0 || idx >= lines.length) continue;
-          var matches = lines[idx].match(/\b\d{6}\b/g);
-          if (matches) {
-            for (var k = 0; k < matches.length; k++) {
-              candidates.push({ value: matches[k], dist: off });
-            }
-          }
-        }
-      }
-      if (candidates.length) {
-        candidates.sort(function(a,b){return a.dist - b.dist;});
-        return candidates[0].value;
-      }
-    }
-    var topLimit = Math.max(3, Math.ceil(lines.length * 0.25));
-    for (var j = 0; j < topLimit; j++) {
-      var m = lines[j].match(/\b\d{6}\b/);
-      if (m) return m[0];
-    }
-    return '';
-  }
-
-  function extractCharge(text) {
-    if (typeof text !== 'string') return '';
-    var lines = text.split('\n');
-    for (var i = 0; i < lines.length; i++) {
-      if (/CHARGEN/i.test(lines[i])) {
-        var s = lines[i].replace(/\$/g, 'S').replace(/[|!]/g, '1').replace(/O/g, '0');
-        var m = s.match(/(\d[\d\s]{4,8}\d)/);
-        if (m) {
-          var digits = m[1].replace(/\s/g, '');
-          if (digits.length >= 5 && digits.length <= 9) return 'SR' + digits;
-        }
-      }
-    }
-    var m2 = text.match(/S[RB]\s*(\d{6,8})/i);
-    if (m2) return 'SR' + m2[1];
-    return '';
-  }
-
-  function extractGewicht(text) {
-    if (typeof text !== 'string') return '';
-    var up = text.toUpperCase();
-    var g = '';
-    var netto = up.match(/NETTO[^\d]{0,15}(\d+)[.,](\d+)\s*(KG|G)?/);
-    if (netto) {
-      var decPart = netto[2];
-      if (/^00[5689]$/.test(decPart)) decPart = '000';
-      g = netto[1] + '.' + decPart;
-      if (netto[3] === 'G') g = (parseFloat(g) / 1000).toFixed(3);
-    } else {
-      var g2 = up.match(/(\d+)[.,](\d{2,3})\s*KG/);
-      if (g2) {
-        var dec = g2[2];
-        if (/^00[5689]$/.test(dec)) dec = '000';
-        g = g2[1] + '.' + dec;
-      }
-    }
-    return g;
-  }
-
-  function extractName(text) {
-    if (typeof text !== 'string') return '';
-    var lines = text.split('\n').map(function(s){return s.trim();}).filter(Boolean);
-    var brands = /(ELASTOSIL|FLASTOSIL|LASTOSIL|WACKER|SILICONE|TEROSON|LOCTITE|SIKA)/i;
-    for (var i = 0; i < lines.length; i++) {
-      if (brands.test(lines[i])) {
-        var s = lines[i].replace(/[®©Ⓡ"']/g, '').replace(/\s+/g, ' ').trim().toUpperCase();
-        var bm = s.match(brands);
-        if (bm) s = s.substring(bm.index);
-        s = s.replace(/^F?LA?STOSIL/, 'ELASTOSIL');
-        var mm = s.match(/^(ELASTOSIL\s+M\s*\d{2,4}\s*[A-ZА-Я]?)/);
-        if (mm) s = mm[1].trim();
-        if (/ELASTOSIL\s*M\s*46/i.test(s)) return 'ELASTOSIL M 4601 A';
-        if (s.length >= 4) return s;
-      }
-    }
-    return '';
-  }
-
-  // --- Запуск ---
+  // ---------- Старт ----------
   render();
   console.log('Etiketten Scanner initialized');
 
