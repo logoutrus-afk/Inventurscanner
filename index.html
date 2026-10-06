@@ -39,6 +39,7 @@
   .toast.show{opacity:1}
   .empty{text-align:center;color:#999;padding:20px;font-size:14px}
   .tips{font-size:12px;color:#666;background:#fff8e1;padding:10px;border-radius:8px;margin-bottom:10px;border-left:3px solid #ffc107}
+  #jsError{display:none;background:#dc3545;color:#fff;padding:12px;border-radius:8px;margin-bottom:14px;font-size:13px;word-break:break-word}
 </style>
 </head>
 <body>
@@ -46,6 +47,8 @@
 <header>📦 Etiketten Scanner</header>
 
 <div class="container">
+
+  <div id="jsError"></div>
 
   <div class="card">
     <div class="tips">💡 Наведите камеру на штрихкод — все поля заполнятся автоматически.</div>
@@ -99,135 +102,277 @@
 
 <div class="toast" id="toast"></div>
 
-<script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+<!-- Скрипты с onerror — если CDN не загрузится, мы увидим -->
 <script>
-(function () {
-  const $ = id => document.getElementById(id);
-  const STORAGE_KEY = 'etiketten_records', NAME_KEY = 'etiketten_last_name';
-  let records = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
-  let html5Qr = null, scanning = false;
+  window.__errors = [];
+  window.addEventListener('error', function(e) {
+    var msg = e.message || (e.error && e.error.message) || 'Неизвестная ошибка';
+    window.__errors.push(msg);
+    var box = document.getElementById('jsError');
+    if (box) {
+      box.style.display = 'block';
+      box.textContent = '⚠ Ошибка: ' + msg;
+    }
+    console.error('JS Error:', e);
+  });
+</script>
 
-  // ============================================================
-  //  СПРАВОЧНИК ПРОДУКТОВ
-  //  Ключ — Materialnummer, значение — {name, gewicht}
-  //  Добавляйте сюда все свои продукты
-  // ============================================================
-  const CATALOG = {
-    '201486': { name: 'ELASTOSIL M 4601 A', gewicht: '300.000' },
-    // '123456': { name: 'НАЗВАНИЕ', gewicht: '25.000' },
-    // '789012': { name: 'ДРУГОЕ',   gewicht: '10.000' }
+<script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js" onerror="alert('Не загрузился html5-qrcode. Проверьте интернет.')"></script>
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js" onerror="alert('Не загрузился Tesseract. Проверьте интернет.')"></script>
+
+<script>
+// ============================================================
+//  Безопасная инициализация
+// ============================================================
+(function () {
+  'use strict';
+
+  // --- Безопасные хелперы ---
+  function $(id) { return document.getElementById(id); }
+
+  function on(id, evt, handler) {
+    var el = document.getElementById(id);
+    if (!el) {
+      console.warn('Element not found, skipping handler:', id);
+      return null;
+    }
+    el.addEventListener(evt, handler);
+    return el;
+  }
+
+  function setVal(id, val) {
+    var el = document.getElementById(id);
+    if (el) el.value = val;
+  }
+  function getVal(id) {
+    var el = document.getElementById(id);
+    return el ? el.value : '';
+  }
+  function show(id) {
+    var el = document.getElementById(id);
+    if (el) el.classList.add('active');
+  }
+  function showBlock(id) {
+    var el = document.getElementById(id);
+    if (el) el.style.display = 'block';
+  }
+
+  // --- Состояние ---
+  var records = [];
+  try {
+    records = JSON.parse(localStorage.getItem('etiketten_records') || '[]');
+  } catch (e) {
+    records = [];
+  }
+
+  var html5Qr = null;
+  var scanning = false;
+
+  // --- Справочник продуктов ---
+  // Добавьте сюда свои продукты: Materialnummer → { name, gewicht }
+  var CATALOG = {
+    '201486': { name: 'ELASTOSIL M 4601 A', gewicht: '300.000' }
+    // '305123': { name: '...', gewicht: '25.000' },
   };
 
-  $('name').value = localStorage.getItem(NAME_KEY) || '';
+  // --- Восстановление имени ---
+  var savedName = localStorage.getItem('etiketten_last_name') || '';
+  setVal('name', savedName);
 
-  let toastTimer;
-  function toast(msg, ms=2500){
-    const t=$('toast'); t.textContent=msg; t.classList.add('show');
-    clearTimeout(toastTimer); toastTimer=setTimeout(()=>t.classList.remove('show'), ms);
+  // --- Toast ---
+  var toastTimer;
+  function toast(msg, ms) {
+    ms = ms || 2500;
+    var t = $('toast');
+    if (!t) return;
+    t.textContent = msg;
+    t.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(function(){ t.classList.remove('show'); }, ms);
   }
-  function render(){
-    const list=$('list'); $('counter').textContent=records.length;
-    if(!records.length){list.innerHTML='<div class="empty">Пока пусто.</div>';return;}
-    list.innerHTML=records.map((r,i)=>`
-      <div class="record">
-        <div>
-          <div><b>${esc(r.material||'—')}</b> · ${esc(r.name||'—')}</div>
-          <div style="font-size:12px;color:#666;margin-top:2px">Charge: ${esc(r.charge||'—')} · ${esc(r.gewicht||'—')} kg</div>
-        </div>
-        <button class="del" data-i="${i}">×</button>
-      </div>`).join('');
-  }
-  function esc(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 
-  // ---------- Сохранение ----------
-  $('btnSave').addEventListener('click', () => {
-    const material=$('material').value.trim(), name=$('name').value.trim(),
-          charge=$('charge').value.trim(), gewicht=$('gewicht').value.trim();
-    if(!material && !charge){toast('Заполните Materialnummer или Charge');return;}
-    if(name) localStorage.setItem(NAME_KEY, name);
-    records.push({material,name,charge,gewicht});
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(records));
+  // --- Экранирование ---
+  function esc(s) {
+    return String(s).replace(/[&<>"']/g, function(c){
+      return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];
+    });
+  }
+
+  // --- Отрисовка списка записей ---
+  function render() {
+    var list = $('list');
+    var counter = $('counter');
+    if (!list) return;
+    if (counter) counter.textContent = records.length;
+    if (!records.length) {
+      list.innerHTML = '<div class="empty">Пока пусто.</div>';
+      return;
+    }
+    list.innerHTML = records.map(function(r, i){
+      return '<div class="record">' +
+        '<div>' +
+          '<div><b>' + esc(r.material || '—') + '</b> · ' + esc(r.name || '—') + '</div>' +
+          '<div style="font-size:12px;color:#666;margin-top:2px">' +
+            'Charge: ' + esc(r.charge || '—') + ' · ' + esc(r.gewicht || '—') + ' kg' +
+          '</div>' +
+        '</div>' +
+        '<button class="del" data-i="' + i + '">×</button>' +
+      '</div>';
+    }).join('');
+  }
+
+  // ============================================================
+  //  СОХРАНЕНИЕ
+  // ============================================================
+  on('btnSave', 'click', function () {
+    var material = getVal('material').trim();
+    var name = getVal('name').trim();
+    var charge = getVal('charge').trim();
+    var gewicht = getVal('gewicht').trim();
+
+    if (!material && !charge) { toast('Заполните Materialnummer или Charge'); return; }
+    if (name) localStorage.setItem('etiketten_last_name', name);
+
+    records.push({ material: material, name: name, charge: charge, gewicht: gewicht });
+    localStorage.setItem('etiketten_records', JSON.stringify(records));
     render();
-    $('material').value='';$('charge').value='';$('gewicht').value='';
-    $('material').focus();
+
+    setVal('material', '');
+    setVal('charge', '');
+    setVal('gewicht', '');
+    var matEl = $('material');
+    if (matEl) matEl.focus();
     toast('Сохранено ✓');
   });
-  $('list').addEventListener('click', e => {
-    if(e.target.classList.contains('del')){
-      records.splice(+e.target.dataset.i,1);
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(records)); render();
+
+  on('list', 'click', function (e) {
+    var target = e.target;
+    if (target && target.classList && target.classList.contains('del')) {
+      var idx = parseInt(target.dataset.i, 10);
+      if (!isNaN(idx)) {
+        records.splice(idx, 1);
+        localStorage.setItem('etiketten_records', JSON.stringify(records));
+        render();
+      }
     }
   });
-  $('btnClear').addEventListener('click', () => {
-    if(!records.length || !confirm('Удалить все записи?')) return;
-    records=[]; localStorage.removeItem(STORAGE_KEY); render(); toast('Удалено');
+
+  on('btnClear', 'click', function () {
+    if (!records.length) return;
+    if (!confirm('Удалить все записи?')) return;
+    records = [];
+    localStorage.removeItem('etiketten_records');
+    render();
+    toast('Удалено');
   });
 
-  // ---------- CSV ----------
-  $('btnExport').addEventListener('click', () => {
-    if(!records.length){toast('Нет данных');return;}
-    const rows=['Materialnummer;Name;Charge;Gewicht'];
-    records.forEach(r=>{
-      rows.push([r.material,r.name,r.charge,r.gewicht].map(v=>{
-        v=String(v??''); return /[;"\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v;
+  // ============================================================
+  //  CSV
+  // ============================================================
+  on('btnExport', 'click', function () {
+    if (!records.length) { toast('Нет данных'); return; }
+    var rows = ['Materialnummer;Name;Charge;Gewicht'];
+    records.forEach(function (r) {
+      rows.push([r.material, r.name, r.charge, r.gewicht].map(function (v) {
+        v = String(v == null ? '' : v);
+        return /[;"\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v;
       }).join(';'));
     });
-    const csv='\uFEFF'+rows.join('\n');
-    const filename='scan_export_'+new Date().toISOString().slice(0,10)+'.csv';
-    try{
-      const file=new File([csv],filename,{type:'text/csv'});
-      if(navigator.canShare && navigator.canShare({files:[file]})){
-        navigator.share({files:[file],title:'Scan Export'}).catch(()=>downloadFallback(csv,filename));
+    var csv = '\uFEFF' + rows.join('\n');
+    var filename = 'scan_export_' + new Date().toISOString().slice(0, 10) + '.csv';
+
+    try {
+      var file = new File([csv], filename, { type: 'text/csv' });
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        navigator.share({ files: [file], title: 'Scan Export' })
+          .catch(function () { downloadFallback(csv, filename); });
         return;
       }
-    }catch(e){}
-    downloadFallback(csv,filename);
+    } catch (e) {}
+
+    downloadFallback(csv, filename);
   });
-  function downloadFallback(csv,filename){
-    const blob=new Blob([csv],{type:'text/csv;charset=utf-8'});
-    const url=URL.createObjectURL(blob);
-    const a=document.createElement('a'); a.href=url; a.download=filename;
-    document.body.appendChild(a); a.click(); document.body.removeChild(a);
-    setTimeout(()=>URL.revokeObjectURL(url),3000); toast('Файл сохранён');
+
+  function downloadFallback(csv, filename) {
+    var blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(function () { URL.revokeObjectURL(url); }, 3000);
+    toast('Файл сохранён');
   }
 
   // ============================================================
   //  ШТРИХКОД С ФОТО
   // ============================================================
-  $('btnBarcodeFromPhoto').addEventListener('click', () => {
-    const inp = document.createElement('input');
+  on('btnBarcodeFromPhoto', 'click', function () {
+    var inp = document.createElement('input');
     inp.type = 'file';
     inp.accept = 'image/*';
-    inp.onchange = () => {
-      const file = inp.files && inp.files[0];
+    inp.onchange = function () {
+      var file = inp.files && inp.files[0];
       if (file) scanBarcodeFromImage(file);
     };
     inp.click();
   });
 
-  async function scanBarcodeFromImage(file) {
-    $('preview').src = URL.createObjectURL(file);
-    $('preview').classList.add('active');
-    $('progress').classList.add('active');
-    $('progress').textContent = 'Ищу штрихкод на фото…';
-    $('btnBarcodeFromPhoto').disabled = true;
+  function scanBarcodeFromImage(file) {
+    var preview = $('preview');
+    if (preview) {
+      preview.src = URL.createObjectURL(file);
+      preview.classList.add('active');
+    }
+    var prog = $('progress');
+    if (prog) {
+      prog.classList.add('active');
+      prog.textContent = 'Ищу штрихкод на фото…';
+    }
+    var btn = $('btnBarcodeFromPhoto');
+    if (btn) btn.disabled = true;
+
+    // Создаём временный контейнер (вне экрана) — чтобы точно был виден для html5-qrcode
+    var tempDiv = document.createElement('div');
+    tempDiv.id = 'reader-temp-' + Date.now();
+    tempDiv.style.position = 'fixed';
+    tempDiv.style.left = '-10000px';
+    tempDiv.style.top = '0';
+    tempDiv.style.width = '300px';
+    tempDiv.style.height = '200px';
+    document.body.appendChild(tempDiv);
 
     try {
-      const scanner = new Html5Qrcode('reader', { verbose: false });
-      const result = await scanner.scanFile(file, false);
-      $('bcText').value = result;
-      $('bcBox').classList.add('active');
-      parseBarcode(result);
-      toast('Штрихкод прочитан ✓');
-    } catch (err) {
-      console.error(err);
-      $('bcText').value = 'Не удалось прочитать: ' + (err.message || err);
-      $('bcBox').classList.add('active');
-      toast('Штрихкод не найден на фото', 3500);
-    } finally {
-      $('progress').classList.remove('active');
-      $('btnBarcodeFromPhoto').disabled = false;
+      var scanner = new Html5Qrcode(tempDiv.id, { verbose: false });
+
+      scanner.scanFile(file, false)
+        .then(function (result) {
+          var bct = $('bcText');
+          if (bct) bct.value = result;
+          show('bcBox');
+          parseBarcode(result);
+          toast('Штрихкод прочитан ✓');
+        })
+        .catch(function (err) {
+          console.error('scanFile error:', err);
+          var bct = $('bcText');
+          if (bct) bct.value = 'Не удалось прочитать: ' + (err && err.message ? err.message : err);
+          show('bcBox');
+          toast('Штрихкод не найден на фото', 3500);
+        })
+        .finally(function () {
+          if (prog) prog.classList.remove('active');
+          if (btn) btn.disabled = false;
+          if (tempDiv.parentNode) tempDiv.parentNode.removeChild(tempDiv);
+        });
+    } catch (e) {
+      console.error('scanner creation error:', e);
+      alert('Ошибка запуска сканера: ' + (e.message || e));
+      if (prog) prog.classList.remove('active');
+      if (btn) btn.disabled = false;
+      if (tempDiv.parentNode) tempDiv.parentNode.removeChild(tempDiv);
     }
   }
 
@@ -238,92 +383,74 @@
     if (!raw) return;
     raw = String(raw).trim();
 
-    $('bcText').value = raw;
-    $('bcBox').classList.add('active');
+    var bct = $('bcText');
+    if (bct) bct.value = raw;
+    show('bcBox');
 
-    // ===== ФОРМАТ 1: 00NNNNNN/SRxxxxxx  (ваш случай) =====
-    // Пример: 00201486/SR104689
-    let m = raw.match(/^(\d+)\s*[\/\\\-]\s*([A-Z]{1,4}\s*\d{5,10})$/i);
+    // Формат 1: 00NNNNNN/SRxxxxxx
+    var m = raw.match(/^(\d+)\s*[\/\\\-]\s*([A-Z]{1,4}\s*\d{5,10})$/i);
     if (m) {
       fillFromCustomFormat(m[1], m[2]);
       return;
     }
 
-    // ===== ФОРМАТ 2: просто "SRxxxxxx" =====
+    // Формат 2: только SRxxxxxx
     m = raw.match(/^([A-Z]{1,4}\d{5,10})$/i);
     if (m) {
-      $('charge').value = m[1].toUpperCase();
-      toast('Только Charge — остальное введите');
+      setVal('charge', m[1].toUpperCase());
+      toast('Только Charge — остальное введите вручную');
       return;
     }
 
-    // ===== ФОРМАТ 3: GS1-128 =====
+    // Формат 3: GS1-128
     if (parseGS1(raw)) return;
 
-    // ===== ФОРМАТ 4: ищем хоть что-то =====
-    const sr = raw.toUpperCase().match(/S[RB]?\s?(\d{6,8})/);
-    if (sr) $('charge').value = 'SR' + sr[1];
+    // Формат 4: что-нибудь найдём
+    var sr = raw.toUpperCase().match(/S[RB]?\s?(\d{6,8})/);
+    if (sr) setVal('charge', 'SR' + sr[1]);
 
-    const m6 = raw.match(/(?:^|[^\d])(\d{6})(?!\d)/);
+    var m6 = raw.match(/(?:^|[^\d])(\d{6})(?!\d)/);
     if (m6) {
-      $('material').value = m6[1];
+      setVal('material', m6[1]);
       fillFromCatalog(m6[1]);
     }
 
     toast('Разобрано частично');
   }
 
-  // ===== Ваш формат: 00201486/SR104689 =====
   function fillFromCustomFormat(matRaw, chargeRaw) {
-    // Убираем ведущие нули: 00201486 → 201486
-    let material = matRaw.replace(/^0+/, '');
-
-    // Если после чистки не 6 цифр — берём последние 6
+    var material = matRaw.replace(/^0+/, '');
     if (material.length !== 6) {
-      const m6 = matRaw.match(/(\d{6})$/);
+      var m6 = matRaw.match(/(\d{6})$/);
       if (m6) material = m6[1];
     }
+    var charge = chargeRaw.replace(/\s/g, '').toUpperCase();
 
-    // Charge — чистим пробелы, upper
-    const charge = chargeRaw.replace(/\s/g, '').toUpperCase();
-
-    $('material').value = material;
-    $('charge').value = charge;
-
-    // Подтягиваем Name и Gewicht из справочника
+    setVal('material', material);
+    setVal('charge', charge);
     fillFromCatalog(material);
-
     toast('Штрихкод разобран ✓');
   }
 
-  // ===== Автозаполнение Name и Gewicht из справочника =====
   function fillFromCatalog(material) {
     if (!material) return;
-    const entry = CATALOG[material];
+    var entry = CATALOG[material];
     if (!entry) return;
-
-    // Name — не перетираем, если уже введён вручную
-    if (entry.name && !$('name').value.trim()) {
-      $('name').value = entry.name;
-    }
-    if (entry.gewicht && !$('gewicht').value.trim()) {
-      $('gewicht').value = entry.gewicht;
-    }
+    if (entry.name && !getVal('name').trim()) setVal('name', entry.name);
+    if (entry.gewicht && !getVal('gewicht').trim()) setVal('gewicht', entry.gewicht);
   }
 
-  // ===== GS1-128 =====
   function parseGS1(raw) {
-    let s = raw
+    var s = raw
       .replace(/\x1D/g, '|')
       .replace(/<GS>/gi, '|')
       .replace(/\((\d{2,4})\)/g, '|$1|')
       .replace(/\s+/g, ' ');
 
-    // Проверяем, есть ли хоть один AI
     if (!/\|?\d{2,4}[|\s]/.test(s)) return false;
 
-    const result = {};
-    let m;
+    var result = {};
+    var m;
 
     m = s.match(/(?:^|\|)01[|\s]?(\d{14})/);
     if (m) result.gtin = m[1];
@@ -331,165 +458,280 @@
     m = s.match(/(?:^|\|)10[|\s]?([^|\s]{1,20})/);
     if (m) result.charge = m[1].toUpperCase();
 
-    m = s.match(/(?:^|\|)21[|\s]?([^|\s]{1,20})/);
-    if (m) result.serial = m[1];
-
     m = s.match(/(?:^|\|)3103[|\s]?(\d{6})/);
-    if (m) result.gewicht = (parseInt(m[1],10)/1000).toFixed(3);
+    if (m) result.gewicht = (parseInt(m[1], 10) / 1000).toFixed(3);
 
     m = s.match(/(?:^|\|)3102[|\s]?(\d{5})/);
-    if (m && !result.gewicht) result.gewicht = (parseInt(m[1],10)/100).toFixed(3);
+    if (m && !result.gewicht) result.gewicht = (parseInt(m[1], 10) / 100).toFixed(3);
 
     if (!result.charge && !result.gtin && !result.gewicht) return false;
 
-    // Заполняем поля
     if (result.gtin) {
-      // GTIN — берём последние 6 цифр как Materialnummer
-      const mat = result.gtin.replace(/^0+/, '');
-      const m6 = mat.match(/(\d{6})$/);
+      var mat = result.gtin.replace(/^0+/, '');
+      var m6 = mat.match(/(\d{6})$/);
       if (m6) {
-        $('material').value = m6[1];
+        setVal('material', m6[1]);
         fillFromCatalog(m6[1]);
       }
     }
-    if (result.charge && !$('charge').value) $('charge').value = 'SR' + result.charge.replace(/^SR/i,'');
-    if (result.gewicht && !$('gewicht').value) $('gewicht').value = result.gewicht;
+    if (result.charge && !getVal('charge')) {
+      setVal('charge', 'SR' + result.charge.replace(/^SR/i, ''));
+    }
+    if (result.gewicht && !getVal('gewicht')) setVal('gewicht', result.gewicht);
 
     toast('GS1-128 разобран ✓');
     return true;
   }
 
-  // ---------- Камерный штрихкод ----------
-  $('btnScan').addEventListener('click', async () => {
-    if(scanning){await stopScan();return;}
-    const reader=$('reader'); reader.classList.add('active');
-    $('btnScan').textContent='⏹ Остановить';
-    try{
-      html5Qr=new Html5Qrcode('reader');
-      await html5Qr.start({facingMode:'environment'},{fps:10,qrbox:{width:300,height:180}},
-        (text)=>{
-          $('bcText').value=text;
-          $('bcBox').classList.add('active');
+  // ============================================================
+  //  КАМЕРНЫЙ ШТРИХКОД
+  // ============================================================
+  on('btnScan', 'click', function () {
+    if (scanning) { stopScan(); return; }
+    var reader = $('reader');
+    var btn = $('btnScan');
+    if (!reader || !btn) return;
+
+    reader.classList.add('active');
+    btn.textContent = '⏹ Остановить';
+
+    try {
+      html5Qr = new Html5Qrcode('reader');
+      html5Qr.start(
+        { facingMode: 'environment' },
+        { fps: 10, qrbox: { width: 300, height: 180 } },
+        function (text) {
+          var bct = $('bcText');
+          if (bct) bct.value = text;
+          show('bcBox');
           parseBarcode(text);
-          if(navigator.vibrate)navigator.vibrate(80);
+          if (navigator.vibrate) navigator.vibrate(80);
           stopScan();
-        },()=>{});
-      scanning=true;
-    }catch(e){ alert('Ошибка камеры: '+(e.message||e)); stopScan(); }
+        },
+        function () {}
+      ).then(function () {
+        scanning = true;
+      }).catch(function (e) {
+        alert('Ошибка камеры: ' + (e.message || e));
+        stopScan();
+      });
+    } catch (e) {
+      alert('Ошибка запуска: ' + (e.message || e));
+      stopScan();
+    }
   });
-  async function stopScan(){
-    scanning=false;
-    if(html5Qr){try{await html5Qr.stop();await html5Qr.clear();}catch(e){} html5Qr=null;}
-    $('reader').classList.remove('active');
-    $('btnScan').textContent='📹 Сканировать штрихкод камерой';
+
+  function stopScan() {
+    scanning = false;
+    if (html5Qr) {
+      html5Qr.stop().then(function () {
+        return html5Qr.clear();
+      }).catch(function () {}).finally(function () {
+        html5Qr = null;
+      });
+    }
+    var reader = $('reader');
+    if (reader) reader.classList.remove('active');
+    var btn = $('btnScan');
+    if (btn) btn.textContent = '📹 Сканировать штрихкод камерой';
   }
 
   // ============================================================
-  //  OCR (на случай, если штрихкод не читается)
+  //  OCR (упрощённый — если штрихкод не читается)
   // ============================================================
-  function boldFilter(imageData, w, h, iterations) {
-    const d = imageData.data;
-    const size = w * h;
-    let src = new Uint8ClampedArray(size);
-    let dst = new Uint8ClampedArray(size);
-    for (let i = 0, j = 0; i < d.length; i += 4, j++) src[j] = d[i];
+  on('btnOcrCamera', 'click', function () {
+    var inp = document.createElement('input');
+    inp.type = 'file';
+    inp.accept = 'image/*';
+    inp.capture = 'environment';
+    inp.onchange = function () {
+      if (inp.files && inp.files[0]) runOcr(inp.files[0]);
+    };
+    inp.click();
+  });
 
-    for (let it = 0; it < iterations; it++) {
-      for (let y = 0; y < h; y++) {
-        const yOff = y * w;
-        for (let x = 0; x < w; x++) {
-          let maxV = 0;
-          for (let dy = -1; dy <= 1; dy++) {
-            const ny = y + dy; if (ny < 0 || ny >= h) continue;
-            const rOff = ny * w;
-            for (let dx = -1; dx <= 1; dx++) {
-              const nx = x + dx; if (nx < 0 || nx >= w) continue;
-              const v = src[rOff + nx]; if (v > maxV) maxV = v;
-            }
-          }
-          dst[yOff + x] = maxV;
+  on('btnOcrGallery', 'click', function () {
+    var inp = document.createElement('input');
+    inp.type = 'file';
+    inp.accept = 'image/*';
+    inp.onchange = function () {
+      if (inp.files && inp.files[0]) runOcr(inp.files[0]);
+    };
+    inp.click();
+  });
+
+  function runOcr(file) {
+    if (!file) return;
+
+    var preview = $('preview');
+    if (preview) {
+      preview.src = URL.createObjectURL(file);
+      preview.classList.add('active');
+    }
+    var prog = $('progress');
+    if (prog) {
+      prog.classList.add('active');
+      prog.textContent = 'Распознаю…';
+    }
+
+    if (typeof Tesseract === 'undefined') {
+      alert('Tesseract.js не загружен. Проверьте интернет.');
+      if (prog) prog.classList.remove('active');
+      return;
+    }
+
+    Tesseract.recognize(file, 'deu', {
+      logger: function (m) {
+        if (m && m.status === 'recognizing text' && prog) {
+          prog.textContent = 'Распознаю… ' + Math.round((m.progress || 0) * 100) + '%';
         }
       }
-      const tmp = src; src = dst; dst = tmp;
-    }
-    for (let it = 0; it < iterations; it++) {
-      for (let y = 0; y < h; y++) {
-        const yOff = y * w;
-        for (let x = 0; x < w; x++) {
-          let minV = 255;
-          for (let dy = -1; dy <= 1; dy++) {
-            const ny = y + dy; if (ny < 0 || ny >= h) continue;
-            const rOff = ny * w;
-            for (let dx = -1; dx <= 1; dx++) {
-              const nx = x + dx; if (nx < 0 || nx >= w) continue;
-              const v = src[rOff + nx]; if (v < minV) minV = v;
-            }
-          }
-          dst[yOff + x] = minV;
+    }).then(function (result) {
+      var text = (result && result.data && result.data.text) ? result.data.text : '';
+      var rt = $('rawText');
+      if (rt) rt.value = text;
+      show('rawBox');
+
+      // Materialnummer
+      if (!getVal('material')) {
+        var mat = extractMaterial(text) || extract6Digits(text);
+        if (mat) {
+          setVal('material', mat);
+          fillFromCatalog(mat);
         }
       }
-      const tmp = src; src = dst; dst = tmp;
-    }
-    for (let i = 0, j = 0; i < d.length; i += 4, j++) {
-      d[i] = d[i+1] = d[i+2] = src[j];
-    }
-    return imageData;
+      // Charge
+      if (!getVal('charge')) {
+        var ch = extractCharge(text);
+        if (ch) setVal('charge', ch);
+      }
+      // Gewicht
+      if (!getVal('gewicht')) {
+        var g = extractGewicht(text);
+        if (g) setVal('gewicht', g);
+      }
+      // Name
+      if (!getVal('name').trim()) {
+        var nm = extractName(text);
+        if (nm) setVal('name', nm);
+      }
+
+      toast('OCR обработан');
+    }).catch(function (e) {
+      console.error(e);
+      alert('Ошибка OCR: ' + (e.message || e));
+    }).finally(function () {
+      if (prog) prog.classList.remove('active');
+    });
   }
 
-  function preprocessImage(file, opts = {}) {
-    const upscale   = opts.upscale   || 2;
-    const cropFrom  = opts.cropFrom  ?? 0;
-    const cropTo    = opts.cropTo    ?? 1;
-    const contrast  = opts.contrast  ?? 1.6;
-    const bold      = opts.bold      ?? 0;
-    const mode      = opts.mode      || 'gray';
+  // ============================================================
+  //  Извлечение из OCR
+  // ============================================================
+  function extract6Digits(text) {
+    if (typeof text !== 'string') return '';
+    var m = text.match(/(?:^|\D)(\d{6})(?!\d)/);
+    return m ? m[1] : '';
+  }
 
-    return new Promise((resolve, reject) => {
-      const img = new Image();
-      img.onload = () => {
-        try {
-          const srcY = Math.floor(img.height * cropFrom);
-          const srcH = Math.floor(img.height * (cropTo - cropFrom));
-          const srcW = img.width;
-          if (srcW < 20 || srcH < 20) { reject(new Error('Изображение слишком маленькое')); return; }
-          const w = Math.round(srcW * upscale);
-          const h = Math.round(srcH * upscale);
-          const canvas = document.createElement('canvas');
-          canvas.width = w; canvas.height = h;
-          const ctx = canvas.getContext('2d');
-          ctx.drawImage(img, 0, srcY, srcW, srcH, 0, 0, w, h);
-          const imgData = ctx.getImageData(0, 0, w, h);
-          const d = imgData.data;
-          const N = w * h;
-          for (let i = 0; i < d.length; i += 4) {
-            let g = 0.299*d[i] + 0.587*d[i+1] + 0.114*d[i+2];
-            g = (g - 128) * contrast + 128;
-            g = Math.max(0, Math.min(255, g));
-            d[i] = d[i+1] = d[i+2] = g;
-          }
-          if (mode === 'otsu') {
-            const hist = new Array(256).fill(0);
-            for (let i = 0; i < d.length; i += 4) hist[d[i]]++;
-            let total = N, sum = 0;
-            for (let i = 0; i < 256; i++) sum += i * hist[i];
-            let sumB = 0, wB = 0, maxVar = 0, thr = 128;
-            for (let t = 0; t < 256; t++) {
-              wB += hist[t]; if (!wB) continue;
-              const wF = total - wB; if (!wF) break;
-              sumB += t * hist[t];
-              const mB = sumB / wB, mF = (sum - sumB) / wF;
-              const between = wB * wF * (mB - mF) * (mB - mF);
-              if (between > maxVar) { maxVar = between; thr = t; }
-            }
-            for (let i = 0; i < d.length; i += 4) {
-              const v = d[i] > thr ? 255 : 0;
-              d[i] = d[i+1] = d[i+2] = v;
+  function extractMaterial(text) {
+    if (typeof text !== 'string') return '';
+    var lines = text.split('\n').map(function(s){return s.trim();}).filter(Boolean);
+    var packRe = /P\s*[AА]\s*C\s*[KК]\s*[\s\-_\.]*S\s*T\s*[UÜUО]\s*C\s*[KК]/i;
+    var packIdx = -1;
+    for (var i = 0; i < lines.length; i++) {
+      if (packRe.test(lines[i])) { packIdx = i; break; }
+    }
+    if (packIdx >= 0) {
+      var candidates = [];
+      for (var off = 1; off <= 3; off++) {
+        for (var d = -1; d <= 1; d += 2) {
+          var idx = packIdx + d * off;
+          if (idx < 0 || idx >= lines.length) continue;
+          var matches = lines[idx].match(/\b\d{6}\b/g);
+          if (matches) {
+            for (var k = 0; k < matches.length; k++) {
+              candidates.push({ value: matches[k], dist: off });
             }
           }
-          if (bold > 0) boldFilter(imgData, w, h, bold);
-          ctx.putImageData(imgData, 0, 0);
-          canvas.toBlob(blob => {
-            if (blob) resolve(blob);
-            else reject(new Error('Не удалось создать изображение'));
-          }, 'image/png');
-        } 
+        }
+      }
+      if (candidates.length) {
+        candidates.sort(function(a,b){return a.dist - b.dist;});
+        return candidates[0].value;
+      }
+    }
+    var topLimit = Math.max(3, Math.ceil(lines.length * 0.25));
+    for (var j = 0; j < topLimit; j++) {
+      var m = lines[j].match(/\b\d{6}\b/);
+      if (m) return m[0];
+    }
+    return '';
+  }
+
+  function extractCharge(text) {
+    if (typeof text !== 'string') return '';
+    var lines = text.split('\n');
+    for (var i = 0; i < lines.length; i++) {
+      if (/CHARGEN/i.test(lines[i])) {
+        var s = lines[i].replace(/\$/g, 'S').replace(/[|!]/g, '1').replace(/O/g, '0');
+        var m = s.match(/(\d[\d\s]{4,8}\d)/);
+        if (m) {
+          var digits = m[1].replace(/\s/g, '');
+          if (digits.length >= 5 && digits.length <= 9) return 'SR' + digits;
+        }
+      }
+    }
+    var m2 = text.match(/S[RB]\s*(\d{6,8})/i);
+    if (m2) return 'SR' + m2[1];
+    return '';
+  }
+
+  function extractGewicht(text) {
+    if (typeof text !== 'string') return '';
+    var up = text.toUpperCase();
+    var g = '';
+    var netto = up.match(/NETTO[^\d]{0,15}(\d+)[.,](\d+)\s*(KG|G)?/);
+    if (netto) {
+      var decPart = netto[2];
+      if (/^00[5689]$/.test(decPart)) decPart = '000';
+      g = netto[1] + '.' + decPart;
+      if (netto[3] === 'G') g = (parseFloat(g) / 1000).toFixed(3);
+    } else {
+      var g2 = up.match(/(\d+)[.,](\d{2,3})\s*KG/);
+      if (g2) {
+        var dec = g2[2];
+        if (/^00[5689]$/.test(dec)) dec = '000';
+        g = g2[1] + '.' + dec;
+      }
+    }
+    return g;
+  }
+
+  function extractName(text) {
+    if (typeof text !== 'string') return '';
+    var lines = text.split('\n').map(function(s){return s.trim();}).filter(Boolean);
+    var brands = /(ELASTOSIL|FLASTOSIL|LASTOSIL|WACKER|SILICONE|TEROSON|LOCTITE|SIKA)/i;
+    for (var i = 0; i < lines.length; i++) {
+      if (brands.test(lines[i])) {
+        var s = lines[i].replace(/[®©Ⓡ"']/g, '').replace(/\s+/g, ' ').trim().toUpperCase();
+        var bm = s.match(brands);
+        if (bm) s = s.substring(bm.index);
+        s = s.replace(/^F?LA?STOSIL/, 'ELASTOSIL');
+        var mm = s.match(/^(ELASTOSIL\s+M\s*\d{2,4}\s*[A-ZА-Я]?)/);
+        if (mm) s = mm[1].trim();
+        if (/ELASTOSIL\s*M\s*46/i.test(s)) return 'ELASTOSIL M 4601 A';
+        if (s.length >= 4) return s;
+      }
+    }
+    return '';
+  }
+
+  // --- Запуск ---
+  render();
+  console.log('Etiketten Scanner initialized');
+
+})();
+</script>
+</body>
+</html>
