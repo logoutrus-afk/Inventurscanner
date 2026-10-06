@@ -70,16 +70,16 @@
     </div>
 
     <label>Materialnummer</label>
-    <input type="text" id="material" inputmode="numeric" placeholder="201486">
+    <input type="text" id="material" inputmode="numeric" placeholder="201486" autocomplete="off">
 
     <label>Name</label>
-    <input type="text" id="name" placeholder="ELASTOSIL M 4601 A">
+    <input type="text" id="name" placeholder="ELASTOSIL M 4601 A" autocomplete="off">
 
     <label>Charge</label>
-    <input type="text" id="charge" placeholder="SR104689">
+    <input type="text" id="charge" placeholder="SR104689" autocomplete="off">
 
     <label>Gewicht (kg)</label>
-    <input type="number" id="gewicht" step="0.001" placeholder="300.000">
+    <input type="number" id="gewicht" step="0.001" placeholder="300.000" autocomplete="off">
 
     <button class="btn-save" id="btnSave">💾 Сохранить запись</button>
   </div>
@@ -99,9 +99,6 @@
 
 <div class="toast" id="toast"></div>
 
-<!-- ============================================================ -->
-<!-- Глобальная обработка ошибок                                  -->
-<!-- ============================================================ -->
 <script>
   window.__errCount = 0;
   window.addEventListener('error', function(e) {
@@ -114,32 +111,23 @@
   });
 </script>
 
-<!-- ============================================================ -->
-<!-- Внешние библиотеки с обработчиками загрузки                  -->
-<!-- ============================================================ -->
 <script>
   window.__html5qrcodeLoaded = false;
-  window.__tesseractLoaded = false;
 </script>
 
 <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"
         onload="window.__html5qrcodeLoaded = true"
         onerror="console.warn('html5-qrcode не загрузился')"></script>
 
-<!-- ============================================================ -->
-<!-- Основной скрипт (максимально защищённый)                     -->
-<!-- ============================================================ -->
 <script>
 (function () {
   'use strict';
 
-  // ---- Хелперы ----
   function $(id) { return document.getElementById(id); }
   function setVal(id, v) { var el = $(id); if (el) el.value = v; }
   function getVal(id) { var el = $(id); return el ? el.value : ''; }
   function show(id) { var el = $(id); if (el) el.classList.add('active'); }
 
-  // ---- Статус загрузки ----
   function setStatus(txt, color) {
     var el = $('status');
     if (!el) return;
@@ -147,7 +135,6 @@
     el.style.background = color || '#17a2b8';
   }
 
-  // ---- Toast ----
   var toastTimer;
   function toast(msg, ms) {
     ms = ms || 2500;
@@ -159,7 +146,7 @@
     toastTimer = setTimeout(function(){ t.classList.remove('show'); }, ms);
   }
 
-  // ---- Тестовая кнопка (сразу) ----
+  // ---- Тест ----
   try {
     var testBtn = $('btnTest');
     if (testBtn) {
@@ -177,9 +164,7 @@
 
   // ---- Состояние ----
   var records = [];
-  try {
-    records = JSON.parse(localStorage.getItem('etiketten_records') || '[]');
-  } catch (e) { records = []; }
+  try { records = JSON.parse(localStorage.getItem('etiketten_records') || '[]'); } catch (e) { records = []; }
 
   var html5Qr = null;
   var scanning = false;
@@ -188,10 +173,12 @@
     '201486': { name: 'ELASTOSIL M 4601 A', gewicht: '300.000' }
   };
 
-  try {
-    var savedName = localStorage.getItem('etiketten_last_name') || '';
-    setVal('name', savedName);
-  } catch (e) {}
+  // ⚠️ УБРАЛИ восстановление Name из localStorage
+  // При каждом открытии — поле чистое.
+  // Если хотите очищать ещё и другие поля — раскомментируйте строки ниже:
+  // setVal('material', '');
+  // setVal('charge', '');
+  // setVal('gewicht', '');
 
   function esc(s) {
     return String(s).replace(/[&<>"']/g, function(c){
@@ -199,11 +186,10 @@
     });
   }
 
-  // ---- Проверка штрихкода ----
   function isValidBarcode(raw) {
     if (!raw) return false;
     var s = String(raw).trim();
-    if (/^\d{9,}$/.test(s)) return false; // нижний штрихкод
+    if (/^\d{9,}$/.test(s)) return false;
     if (/^\d{4,10}\s*[\/\\\-]\s*[A-Z]{1,4}\s*\d{5,10}$/i.test(s)) return true;
     if (/^[A-Z]{1,4}\d{5,10}$/i.test(s)) return true;
     if (/\(\d{2,4}\)/.test(s) || /\x1D/.test(s)) return true;
@@ -211,9 +197,6 @@
     return false;
   }
 
-  // ============================================================
-  //  ОТРИСОВКА ЗАПИСЕЙ
-  // ============================================================
   function render() {
     var list = $('list');
     var counter = $('counter');
@@ -244,11 +227,20 @@
           var charge = getVal('charge').trim();
           var gewicht = getVal('gewicht').trim();
           if (!material && !charge) { toast('Заполните Materialnummer или Charge'); return; }
-          if (name) localStorage.setItem('etiketten_last_name', name);
+
+          // ⚠️ УБРАЛИ сохранение name в localStorage
+          // if (name) localStorage.setItem('etiketten_last_name', name);
+
           records.push({ material: material, name: name, charge: charge, gewicht: gewicht });
           localStorage.setItem('etiketten_records', JSON.stringify(records));
           render();
-          setVal('material', ''); setVal('charge', ''); setVal('gewicht', '');
+
+          // Очищаем ВСЕ поля после сохранения
+          setVal('material', '');
+          setVal('name', '');
+          setVal('charge', '');
+          setVal('gewicht', '');
+
           var m = $('material'); if (m) m.focus();
           toast('Сохранено ✓');
         } catch (e) {
@@ -258,7 +250,6 @@
     }
   } catch (e) { console.error('Save button error:', e); }
 
-  // ---- Удаление ----
   try {
     var listEl = $('list');
     if (listEl) {
@@ -276,7 +267,6 @@
     }
   } catch (e) { console.error('List error:', e); }
 
-  // ---- Очистка ----
   try {
     var clearBtn = $('btnClear');
     if (clearBtn) {
@@ -291,7 +281,6 @@
     }
   } catch (e) { console.error('Clear error:', e); }
 
-  // ---- CSV ----
   try {
     var exportBtn = $('btnExport');
     if (exportBtn) {
@@ -373,6 +362,7 @@
     if (!material) return;
     var entry = CATALOG[material];
     if (!entry) return;
+    // Заполняем только если поле пустое
     if (entry.name && !getVal('name').trim()) setVal('name', entry.name);
     if (entry.gewicht && !getVal('gewicht').trim()) setVal('gewicht', entry.gewicht);
   }
@@ -564,7 +554,6 @@
     });
   }
 
-  // Native BarcodeDetector — безопасная инициализация
   var nativeDetector = null;
   try {
     if ('BarcodeDetector' in window) {
@@ -678,7 +667,6 @@
         try { blob = await renderPlan(img, plan); }
         catch (e) { lastErr = e; continue; }
 
-        // Native
         var nativeResults = null;
         try { nativeResults = await tryNativeDetect(blob); } catch (e) {}
 
@@ -696,7 +684,6 @@
           }
         }
 
-        // html5-qrcode
         var results = null;
         try { results = await tryHtml5Qrcode(blob); } catch (e) { lastErr = e; }
 
@@ -738,11 +725,8 @@
   // ============================================================
   //  СТАРТ
   // ============================================================
-  try {
-    render();
-  } catch (e) { console.error('Render error:', e); }
+  try { render(); } catch (e) { console.error('Render error:', e); }
 
-  // Обновляем статус через 500мс
   setTimeout(function () {
     var libs = [];
     libs.push(window.__html5qrcodeLoaded ? 'html5-qrcode ✓' : 'html5-qrcode ✗');
