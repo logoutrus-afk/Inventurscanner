@@ -21,6 +21,7 @@
   .rec{background:#f8f9fa;border-radius:8px;padding:8px;margin-bottom:6px;font-size:14px;display:flex;justify-content:space-between}
   .del{background:#dc3545;color:#fff;border:none;width:30px;height:30px;border-radius:50%;font-size:16px;padding:0;margin:0}
   .tip{font-size:12px;background:#fff3cd;padding:8px;border-radius:8px;margin-bottom:8px}
+  .status{font-size:13px;color:#0d6efd;padding:6px;text-align:center;min-height:22px}
 </style>
 </head>
 <body>
@@ -29,9 +30,10 @@
 <div class="container">
 
   <div class="card">
-    <div class="tip">💡 Сканируйте верхний штрихкод (00NNNNNN/SRxxxxxx). Нижний игнорируется.</div>
+    <div class="tip">💡 Сканируйте верхний штрихкод. Нижний игнорируется автоматически.</div>
     <button class="b1" id="scanBtn">📹 Сканировать камерой</button>
     <button class="b2" id="photoBtn">▦ Прочитать с фото</button>
+    <div class="status" id="status"></div>
     <div id="reader"></div>
     <label>Штрихкод:</label>
     <textarea id="bcText" readonly rows="2"></textarea>
@@ -71,6 +73,8 @@
     '201486': { name: 'ELASTOSIL M 4601 A', gewicht: '300.000' }
   };
 
+  function setStatus(t){ $('status').textContent = t || ''; }
+
   function render(){
     $('cnt').textContent = records.length;
     var h = '';
@@ -82,12 +86,13 @@
     $('list').innerHTML = h || '<div style="color:#999">Пока пусто</div>';
   }
 
+  // Верхний штрихкод — валидный, нижний — нет
   function valid(raw){
     if(!raw) return false;
     var s = String(raw).trim();
-    if(/^\d{9,}$/.test(s)) return false;
-    if(/^\d{4,10}\s*[\/\\-]\s*[A-Z]{1,4}\s*\d{5,10}$/i.test(s)) return true;
-    if(/^[A-Z]{1,4}\d{5,10}$/i.test(s)) return true;
+    if(/^\d{9,}$/.test(s)) return false;   // нижний: только 10 цифр
+    if(/^\d{4,10}\s*[\/\\-]\s*[A-Z]{1,4}\s*\d{5,10}$/i.test(s)) return true; // 00201486/SR104689
+    if(/^[A-Z]{1,4}\d{5,10}$/i.test(s)) return true;   // SR104689
     if(/S[RB]?\s?\d{6,8}/i.test(s)) return true;
     return false;
   }
@@ -104,60 +109,142 @@
         if(!$('name').value) $('name').value = CATALOG[mat].name;
         if(!$('gewicht').value) $('gewicht').value = CATALOG[mat].gewicht;
       }
-      return;
+      return true;
     }
     m = raw.match(/^([A-Z]{1,4}\d{5,10})$/i);
-    if(m){ $('charge').value = m[1].toUpperCase(); return; }
+    if(m){ $('charge').value = m[1].toUpperCase(); return true; }
     m = raw.match(/(\d{6})(?!\d)/);
-    if(m) $('material').value = m[1];
+    if(m){ $('material').value = m[1]; return true; }
+    return false;
   }
 
-  // Кнопка камеры
+  // ============ КАМЕРА ============
   $('scanBtn').onclick = function(){
-    if(typeof Html5Qrcode === 'undefined'){ alert('Нет интернета?'); return; }
+    if(typeof Html5Qrcode === 'undefined'){ alert('Нет интернета'); return; }
     var r = $('reader');
     r.classList.add('on');
-    this.textContent = '⏹ Остановить';
     var self = this;
+    self.textContent = '⏹ Остановить';
+    setStatus('Наведите на верхний штрихкод…');
+
     var qr = new Html5Qrcode('reader');
     qr.start({facingMode:'environment'},{fps:10,qrbox:{width:280,height:160}},
       function(text){
-        if(!valid(text)) return;
+        if(!valid(text)){
+          setStatus('Это нижний. Наведите на верхний…');
+          return;
+        }
+        setStatus('');
         $('bcText').value = text;
         parse(text);
         qr.stop().then(function(){ return qr.clear(); }).then(function(){
           r.classList.remove('on');
           self.textContent = '📹 Сканировать камерой';
         });
-      }, function(){});
+      },
+      function(){});
   };
 
-  // Кнопка фото
+  // ============ ФОТО ============
+  // Увеличиваем изображение и пробуем читать несколько раз
+  function scaleImage(file, scale, cb){
+    var img = new Image();
+    img.onload = function(){
+      var w = Math.round(img.width * scale);
+      var h = Math.round(img.height * scale);
+      if(Math.max(w,h) > 4000){
+        var k = 4000/Math.max(w,h);
+        w = Math.round(w*k); h = Math.round(h*k);
+      }
+      var c = document.createElement('canvas');
+      c.width = w; c.height = h;
+      var ctx = c.getContext('2d');
+      ctx.imageSmoothingQuality = 'high';
+      ctx.drawImage(img, 0, 0, w, h);
+      c.toBlob(cb, 'image/png');
+    };
+    img.onerror = function(){ cb(null); };
+    img.src = URL.createObjectURL(file);
+  }
+
+  function scanBlob(blob, onOk, onFail){
+    var d = document.createElement('div');
+    d.id = 'tmp' + Date.now() + Math.random();
+    d.style.cssText = 'position:fixed;left:-9999px;width:400px;height:300px';
+    document.body.appendChild(d);
+    var qr = new Html5Qrcode(d.id, {verbose:false});
+    var f;
+    try { f = new File([blob], 's.png', {type:'image/png'}); } catch(e){ f = blob; }
+    qr.scanFile(f, false).then(function(res){
+      if(document.body.contains(d)) document.body.removeChild(d);
+      onOk(res);
+    }).catch(function(err){
+      if(document.body.contains(d)) document.body.removeChild(d);
+      onFail(err);
+    });
+  }
+
   $('photoBtn').onclick = function(){
     var inp = document.createElement('input');
     inp.type = 'file'; inp.accept = 'image/*';
     inp.onchange = function(){
       var f = inp.files[0]; if(!f) return;
-      if(typeof Html5Qrcode === 'undefined'){ alert('Нет интернета?'); return; }
-      var d = document.createElement('div');
-      d.style.cssText = 'position:fixed;left:-9999px;width:300px;height:200px';
-      document.body.appendChild(d);
-      d.id = 'tmpScan';
-      var qr = new Html5Qrcode('tmpScan');
-      qr.scanFile(f, false).then(function(res){
-        if(document.body.contains(d)) document.body.removeChild(d);
-        $('bcText').value = res;
-        parse(res);
-        alert('Прочитано: ' + res);
-      }).catch(function(){
-        if(document.body.contains(d)) document.body.removeChild(d);
-        alert('Штрихкод не найден. Сфотографируйте ближе.');
-      });
+      if(typeof Html5Qrcode === 'undefined'){ alert('Нет интернета'); return; }
+      var btn = $('photoBtn');
+      btn.disabled = true;
+      setStatus('Ищу штрихкод…');
+
+      // Пробуем масштабы по очереди: 1, 2, 3, 4
+      var scales = [1, 2, 3, 4];
+      var idx = 0;
+      var ignored = [];
+
+      function tryNext(){
+        if(idx >= scales.length){
+          setStatus('');
+          btn.disabled = false;
+          if(ignored.length){
+            alert('Верхний штрихкод не найден.\n\nПрочитан нижний: ' + ignored[0] +
+                  '\n\nПопробуйте сфотографировать верхний штрихкод крупнее или обрезать фото.');
+          } else {
+            alert('Штрихкод не найден. Сфотографируйте ближе, без бликов.');
+          }
+          return;
+        }
+        var scale = scales[idx++];
+        setStatus('Попытка ' + idx + '/' + scales.length + ' (×' + scale + ')…');
+
+        var runScan = function(blob){
+          if(!blob){ tryNext(); return; }
+          scanBlob(blob,
+            function(res){
+              if(valid(res)){
+                // Нашли верхний!
+                setStatus('');
+                btn.disabled = false;
+                $('bcText').value = res;
+                parse(res);
+                setStatus('✓ Прочитано: ' + res);
+              } else {
+                // Прочитан нижний — запоминаем и пробуем дальше
+                ignored.push(res);
+                tryNext();
+              }
+            },
+            function(){ tryNext(); }
+          );
+        };
+
+        if(scale === 1){ runScan(f); }
+        else { scaleImage(f, scale, runScan); }
+      }
+
+      tryNext();
     };
     inp.click();
   };
 
-  // Сохранить
+  // ============ СОХРАНИТЬ ============
   $('saveBtn').onclick = function(){
     var r = {
       material: $('material').value.trim(),
@@ -174,7 +261,6 @@
     render();
   };
 
-  // Удаление
   $('list').onclick = function(e){
     if(e.target.className === 'del'){
       records.splice(+e.target.dataset.i, 1);
@@ -183,7 +269,6 @@
     }
   };
 
-  // Очистить
   $('clrBtn').onclick = function(){
     if(!records.length) return;
     if(!confirm('Удалить все?')) return;
@@ -192,7 +277,6 @@
     render();
   };
 
-  // CSV
   $('csvBtn').onclick = function(){
     if(!records.length){ alert('Нет данных'); return; }
     var rows = ['Materialnummer;Name;Charge;Gewicht'];
