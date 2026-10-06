@@ -33,6 +33,9 @@
   #bcBox{display:none;margin-bottom:10px;background:#fff8e1;border-left:3px solid #fd7e14;padding:10px;border-radius:8px}
   #bcBox.active{display:block}
   #bcText{width:100%;min-height:60px;font-family:monospace;font-size:13px;padding:8px;border:1px solid #ffc107;border-radius:8px;background:#fff;resize:vertical}
+  #rawBox{display:none;margin-bottom:10px;background:#e7f1ff;border-left:3px solid #0d6efd;padding:10px;border-radius:8px}
+  #rawBox.active{display:block}
+  #rawText{width:100%;min-height:80px;font-family:monospace;font-size:11px;padding:8px;border:1px solid #0d6efd;border-radius:8px;background:#fff;resize:vertical}
   .toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#212529;color:#fff;padding:12px 20px;border-radius:25px;font-size:14px;opacity:0;pointer-events:none;transition:opacity .3s;z-index:100;max-width:90%;text-align:center}
   .toast.show{opacity:1}
   .empty{text-align:center;color:#999;padding:20px;font-size:14px}
@@ -55,10 +58,10 @@
   </div>
 
   <div class="card">
-    <div class="tips">💡 Читается только <b>верхний</b> штрихкод (формат 00NNNNNN/SRxxxxxx).</div>
+    <div class="tips">💡 Читается верхний штрихкод. Если Name/Gewicht не подтянулись из справочника — включится OCR.</div>
 
     <button class="btn-scan" id="btnScan">📹 Сканировать камерой</button>
-    <button class="btn-barcode-photo" id="btnBarcodeFromPhoto">▦ Прочитать с фото</button>
+    <button class="btn-barcode-photo" id="btnBarcodeFromPhoto">▦ Прочитать с фото (+ OCR)</button>
 
     <div id="reader"></div>
     <img id="preview" alt="">
@@ -67,6 +70,11 @@
     <div id="bcBox">
       <label>📊 Содержимое штрихкода:</label>
       <textarea id="bcText" readonly></textarea>
+    </div>
+
+    <div id="rawBox">
+      <label>OCR текст:</label>
+      <textarea id="rawText" readonly></textarea>
     </div>
 
     <label>Materialnummer</label>
@@ -113,11 +121,15 @@
 
 <script>
   window.__html5qrcodeLoaded = false;
+  window.__tesseractLoaded = false;
 </script>
 
 <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"
         onload="window.__html5qrcodeLoaded = true"
         onerror="console.warn('html5-qrcode не загрузился')"></script>
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"
+        onload="window.__tesseractLoaded = true"
+        onerror="console.warn('Tesseract не загрузился')"></script>
 
 <script>
 (function () {
@@ -154,6 +166,7 @@
         var info = [
           'JS работает ✓',
           'html5-qrcode: ' + (window.__html5qrcodeLoaded ? 'загружен' : 'НЕ загружен'),
+          'Tesseract: ' + (window.__tesseractLoaded ? 'загружен' : 'НЕ загружен'),
           'BarcodeDetector: ' + ('BarcodeDetector' in window ? 'есть' : 'нет'),
           'Ошибок JS: ' + window.__errCount
         ];
@@ -162,23 +175,20 @@
     }
   } catch (e) { console.error('Test button error:', e); }
 
-  // ---- Состояние ----
   var records = [];
   try { records = JSON.parse(localStorage.getItem('etiketten_records') || '[]'); } catch (e) { records = []; }
 
   var html5Qr = null;
   var scanning = false;
 
+  // ============================================================
+  //  СПРАВОЧНИК ПРОДУКТОВ
+  //  Ключ — Materialnummer, значение — {name, gewicht}
+  //  ДОБАВЛЯЙТЕ сюда все ваши продукты
+  // ============================================================
   var CATALOG = {
     '201486': { name: 'ELASTOSIL M 4601 A', gewicht: '300.000' }
   };
-
-  // ⚠️ УБРАЛИ восстановление Name из localStorage
-  // При каждом открытии — поле чистое.
-  // Если хотите очищать ещё и другие поля — раскомментируйте строки ниже:
-  // setVal('material', '');
-  // setVal('charge', '');
-  // setVal('gewicht', '');
 
   function esc(s) {
     return String(s).replace(/[&<>"']/g, function(c){
@@ -228,14 +238,11 @@
           var gewicht = getVal('gewicht').trim();
           if (!material && !charge) { toast('Заполните Materialnummer или Charge'); return; }
 
-          // ⚠️ УБРАЛИ сохранение name в localStorage
-          // if (name) localStorage.setItem('etiketten_last_name', name);
-
           records.push({ material: material, name: name, charge: charge, gewicht: gewicht });
           localStorage.setItem('etiketten_records', JSON.stringify(records));
           render();
 
-          // Очищаем ВСЕ поля после сохранения
+          // Полная очистка всех полей
           setVal('material', '');
           setVal('name', '');
           setVal('charge', '');
@@ -355,16 +362,19 @@
     setVal('material', material);
     setVal('charge', charge);
     fillFromCatalog(material);
-    toast('Штрихкод разобран ✓');
   }
 
+  // Возвращает true, если оба поля заполнены (нет необходимости в OCR)
   function fillFromCatalog(material) {
-    if (!material) return;
+    if (!material) return false;
     var entry = CATALOG[material];
-    if (!entry) return;
-    // Заполняем только если поле пустое
+    if (!entry) {
+      console.log('Продукт ' + material + ' не найден в справочнике — нужен OCR');
+      return false;
+    }
     if (entry.name && !getVal('name').trim()) setVal('name', entry.name);
     if (entry.gewicht && !getVal('gewicht').trim()) setVal('gewicht', entry.gewicht);
+    return !!(entry.name && entry.gewicht);
   }
 
   function parseGS1(raw) {
@@ -382,7 +392,6 @@
     }
     if (result.charge && !getVal('charge')) setVal('charge', 'SR' + result.charge.replace(/^SR/i,''));
     if (result.gewicht && !getVal('gewicht')) setVal('gewicht', result.gewicht);
-    toast('GS1-128 ✓');
     return true;
   }
 
@@ -395,7 +404,7 @@
       scanBtn.addEventListener('click', function () {
         if (scanning) { stopScan(); return; }
         if (typeof Html5Qrcode === 'undefined') {
-          alert('Сканер html5-qrcode не загружен. Проверьте интернет и обновите страницу.');
+          alert('Сканер html5-qrcode не загружен. Проверьте интернет.');
           return;
         }
         var reader = $('reader');
@@ -410,7 +419,6 @@
             { fps: 10, qrbox: { width: 300, height: 180 } },
             function (text) {
               if (!isValidBarcode(text)) {
-                console.log('Игнорирую:', text);
                 if (navigator.vibrate) navigator.vibrate(30);
                 return;
               }
@@ -447,7 +455,7 @@
   }
 
   // ============================================================
-  //  ЧТЕНИЕ С ФОТО
+  //  ЧТЕНИЕ С ФОТО (штрихкод + OCR-fallback)
   // ============================================================
   try {
     var photoBtn = $('btnBarcodeFromPhoto');
@@ -492,251 +500,4 @@
       var sumB = 0, wB = 0, maxVar = 0, thr = 128;
       for (var t = 0; t < 256; t++) {
         wB += hist[t]; if (!wB) continue;
-        var wF = total - wB; if (!wF) break;
-        sumB += t * hist[t];
-        var mB = sumB / wB, mF = (sum - sumB) / wF;
-        var between = wB * wF * (mB - mF) * (mB - mF);
-        if (between > maxVar) { maxVar = between; thr = t; }
-      }
-      for (var j4 = 0; j4 < N; j4++) {
-        var val = gray[j4] > thr ? 255 : 0;
-        d[j4*4] = d[j4*4+1] = d[j4*4+2] = val;
-      }
-    }
-  }
-
-  function renderPlan(img, plan) {
-    return new Promise(function (resolve, reject) {
-      try {
-        var cropFrom = plan.crop[0], cropTo = plan.crop[1];
-        var srcY = Math.floor(img.height * cropFrom);
-        var srcH = Math.floor(img.height * (cropTo - cropFrom));
-        var srcW = img.width;
-        if (srcH < 20 || srcW < 20) { reject(new Error('Слишком маленькая область')); return; }
-
-        var scale = plan.scale || 1;
-        var w = Math.round(srcW * scale);
-        var h = Math.round(srcH * scale);
-        var maxSide = 4000;
-        if (Math.max(w, h) > maxSide) {
-          var r = maxSide / Math.max(w, h);
-          w = Math.round(w * r); h = Math.round(h * r);
-        }
-
-        var canvas = document.createElement('canvas');
-        var ctx = canvas.getContext('2d');
-        var rotate = plan.rotate || 0;
-
-        if (rotate === 90 || rotate === 270) {
-          canvas.width = h; canvas.height = w;
-          ctx.translate(canvas.width/2, canvas.height/2);
-          ctx.rotate(rotate * Math.PI / 180);
-          ctx.imageSmoothingEnabled = true;
-          ctx.imageSmoothingQuality = 'high';
-          ctx.drawImage(img, 0, srcY, srcW, srcH, -w/2, -h/2, w, h);
-        } else {
-          canvas.width = w; canvas.height = h;
-          ctx.imageSmoothingEnabled = true;
-          ctx.imageSmoothingQuality = 'high';
-          ctx.drawImage(img, 0, srcY, srcW, srcH, 0, 0, w, h);
-        }
-
-        if (plan.filter && plan.filter !== 'orig') {
-          var imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-          applyFilterToImageData(imgData.data, canvas.width * canvas.height, plan.filter);
-          ctx.putImageData(imgData, 0, 0);
-        }
-
-        canvas.toBlob(function (blob) {
-          if (blob) resolve(blob); else reject(new Error('toBlob failed'));
-        }, 'image/png');
-      } catch (e) { reject(e); }
-    });
-  }
-
-  var nativeDetector = null;
-  try {
-    if ('BarcodeDetector' in window) {
-      nativeDetector = new BarcodeDetector({
-        formats: ['code_128','code_39','ean_13','ean_8','upc_a','upc_e','itf','qr_code']
-      });
-      console.log('BarcodeDetector OK');
-    }
-  } catch (e) {
-    console.warn('BarcodeDetector init failed:', e);
-    nativeDetector = null;
-  }
-
-  async function tryNativeDetect(blob) {
-    if (!nativeDetector) return null;
-    try {
-      var bmp = await createImageBitmap(blob);
-      try {
-        var codes = await nativeDetector.detect(bmp);
-        if (codes && codes.length) return codes.map(function(c){ return c.rawValue; });
-      } finally {
-        if (bmp.close) bmp.close();
-      }
-    } catch (e) { /* ignore */ }
-    return null;
-  }
-
-  function tryHtml5Qrcode(blob) {
-    return new Promise(function (resolve, reject) {
-      if (typeof Html5Qrcode === 'undefined') {
-        reject(new Error('html5-qrcode не загружен'));
-        return;
-      }
-      var tempDiv = document.createElement('div');
-      tempDiv.id = 'rdr-' + Date.now() + '-' + Math.random();
-      tempDiv.style.position = 'fixed';
-      tempDiv.style.left = '-10000px';
-      tempDiv.style.top = '0';
-      tempDiv.style.width = '400px';
-      tempDiv.style.height = '300px';
-      document.body.appendChild(tempDiv);
-
-      var scanner;
-      try {
-        scanner = new Html5Qrcode(tempDiv.id, { verbose: false });
-      } catch (e) {
-        if (tempDiv.parentNode) tempDiv.parentNode.removeChild(tempDiv);
-        reject(e); return;
-      }
-
-      var f;
-      try { f = new File([blob], 's.png', { type: 'image/png' }); } catch (e) { f = blob; }
-
-      scanner.scanFile(f, false)
-        .then(function (r) {
-          if (tempDiv.parentNode) tempDiv.parentNode.removeChild(tempDiv);
-          resolve([r]);
-        })
-        .catch(function (err) {
-          if (tempDiv.parentNode) tempDiv.parentNode.removeChild(tempDiv);
-          reject(err);
-        });
-    });
-  }
-
-  function applyBarcode(code, source) {
-    var bct = $('bcText');
-    if (bct) bct.value = code + (source ? '  [' + source + ']' : '');
-    show('bcBox');
-    parseBarcode(code);
-    toast('Штрихкод прочитан ✓ (' + source + ')');
-  }
-
-  async function scanBarcodeFromImage(file) {
-    var preview = $('preview');
-    if (preview) { preview.src = URL.createObjectURL(file); preview.classList.add('active'); }
-    var prog = $('progress');
-    if (prog) { prog.classList.add('active'); prog.textContent = 'Готовлю…'; }
-    var btn = $('btnBarcodeFromPhoto');
-    if (btn) btn.disabled = true;
-
-    var ignored = [];
-    var lastErr = null;
-
-    try {
-      var img = await loadImageFromFile(file);
-
-      var plans = [];
-      [1, 1.5, 2, 3].forEach(function(s){ plans.push({ scale: s, filter: 'orig',   crop: [0, 1] }); });
-      [1, 1.5, 2].forEach(function(s){ plans.push({ scale: s, filter: 'gray',   crop: [0, 1] }); });
-      [1, 1.5, 2].forEach(function(s){ plans.push({ scale: s, filter: 'binary', crop: [0, 1] }); });
-      [1.5, 2, 3].forEach(function(s){ plans.push({ scale: s, filter: 'orig',   crop: [0, 0.55] }); });
-      [1.5, 2].forEach(function(s){
-        plans.push({ scale: s, filter: 'gray',   crop: [0, 0.55] });
-        plans.push({ scale: s, filter: 'binary', crop: [0, 0.55] });
-      });
-      [2, 3].forEach(function(s){
-        plans.push({ scale: s, filter: 'orig',   crop: [0, 0.35] });
-        plans.push({ scale: s, filter: 'binary', crop: [0, 0.35] });
-      });
-      [90, 180, 270].forEach(function(rot){
-        plans.push({ scale: 1.5, filter: 'gray', crop: [0, 1], rotate: rot });
-      });
-
-      for (var i = 0; i < plans.length; i++) {
-        var plan = plans[i];
-        var label = 'Попытка ' + (i+1) + '/' + plans.length;
-        if (prog) prog.textContent = label + '…';
-
-        var blob;
-        try { blob = await renderPlan(img, plan); }
-        catch (e) { lastErr = e; continue; }
-
-        var nativeResults = null;
-        try { nativeResults = await tryNativeDetect(blob); } catch (e) {}
-
-        if (nativeResults && nativeResults.length) {
-          var foundNative = null;
-          for (var n = 0; n < nativeResults.length; n++) {
-            if (isValidBarcode(nativeResults[n])) { foundNative = nativeResults[n]; break; }
-            else ignored.push(nativeResults[n]);
-          }
-          if (foundNative) {
-            if (prog) prog.classList.remove('active');
-            if (btn) btn.disabled = false;
-            applyBarcode(foundNative, label + ' native');
-            return;
-          }
-        }
-
-        var results = null;
-        try { results = await tryHtml5Qrcode(blob); } catch (e) { lastErr = e; }
-
-        if (results && results.length) {
-          var foundH5 = null;
-          for (var h = 0; h < results.length; h++) {
-            if (isValidBarcode(results[h])) { foundH5 = results[h]; break; }
-            else ignored.push(results[h]);
-          }
-          if (foundH5) {
-            if (prog) prog.classList.remove('active');
-            if (btn) btn.disabled = false;
-            applyBarcode(foundH5, label);
-            return;
-          }
-        }
-      }
-
-      var msg = 'Не найден верхний штрихкод после ' + plans.length + ' попыток.';
-      if (ignored.length) {
-        var uniq = [];
-        ignored.forEach(function(x){ if (uniq.indexOf(x) === -1) uniq.push(x); });
-        msg += '\n\nПрочитаны, но проигнорированы:\n' + uniq.slice(0, 10).join('\n');
-      }
-      msg += '\n\nСовет: сфотографируйте верхний штрихкод крупно, без бликов.';
-      if (lastErr) msg += '\n\nОшибка: ' + (lastErr.message || lastErr);
-      var bct = $('bcText'); if (bct) bct.value = msg;
-      show('bcBox');
-      toast('Верхний штрихкод не найден', 4000);
-
-    } catch (e) {
-      alert('Ошибка: ' + (e.message || e));
-    } finally {
-      if (prog) prog.classList.remove('active');
-      if (btn) btn.disabled = false;
-    }
-  }
-
-  // ============================================================
-  //  СТАРТ
-  // ============================================================
-  try { render(); } catch (e) { console.error('Render error:', e); }
-
-  setTimeout(function () {
-    var libs = [];
-    libs.push(window.__html5qrcodeLoaded ? 'html5-qrcode ✓' : 'html5-qrcode ✗');
-    libs.push(nativeDetector ? 'BarcodeDetector ✓' : 'BarcodeDetector ✗');
-    setStatus('✅ Загружено: ' + libs.join(' | '), '#198754');
-  }, 1000);
-
-  console.log('Scanner initialized');
-
-})();
-</script>
-</body>
-</html>
+        var wF = total - wB; if
