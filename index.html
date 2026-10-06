@@ -241,6 +241,9 @@
     return imageData;
   }
 
+  // ============================================================
+  //  Предобработка с защитой от слишком маленьких изображений
+  // ============================================================
   function preprocessImage(file, opts = {}) {
     const upscale   = opts.upscale   || 2;
     const cropFrom  = opts.cropFrom  ?? 0;
@@ -252,71 +255,96 @@
     return new Promise((resolve, reject) => {
       const img = new Image();
       img.onload = () => {
-        const srcY = Math.floor(img.height * cropFrom);
-        const srcH = Math.floor(img.height * (cropTo - cropFrom));
-        const srcW = img.width;
-        const w = Math.round(srcW * upscale);
-        const h = Math.round(srcH * upscale);
-        const canvas = document.createElement('canvas');
-        canvas.width = w; canvas.height = h;
-        const ctx = canvas.getContext('2d');
-        ctx.drawImage(img, 0, srcY, srcW, srcH, 0, 0, w, h);
+        try {
+          const srcY = Math.floor(img.height * cropFrom);
+          const srcH = Math.floor(img.height * (cropTo - cropFrom));
+          const srcW = img.width;
 
-        const imgData = ctx.getImageData(0, 0, w, h);
-        const d = imgData.data;
-        const N = w * h;
-
-        for (let i = 0; i < d.length; i += 4) {
-          let g = 0.299*d[i] + 0.587*d[i+1] + 0.114*d[i+2];
-          g = (g - 128) * contrast + 128;
-          g = Math.max(0, Math.min(255, g));
-          d[i] = d[i+1] = d[i+2] = g;
-        }
-
-        if (mode === 'otsu') {
-          const hist = new Array(256).fill(0);
-          for (let i = 0; i < d.length; i += 4) hist[d[i]]++;
-          let total = N, sum = 0;
-          for (let i = 0; i < 256; i++) sum += i * hist[i];
-          let sumB = 0, wB = 0, maxVar = 0, thr = 128;
-          for (let t = 0; t < 256; t++) {
-            wB += hist[t]; if (!wB) continue;
-            const wF = total - wB; if (!wF) break;
-            sumB += t * hist[t];
-            const mB = sumB / wB, mF = (sum - sumB) / wF;
-            const between = wB * wF * (mB - mF) * (mB - mF);
-            if (between > maxVar) { maxVar = between; thr = t; }
+          if (srcW < 20 || srcH < 20) {
+            reject(new Error('Изображение слишком маленькое после обрезки (' + srcW + 'x' + srcH + ')'));
+            return;
           }
+
+          const w = Math.round(srcW * upscale);
+          const h = Math.round(srcH * upscale);
+
+          if (w < 10 || h < 10) {
+            reject(new Error('Итоговый размер слишком маленький'));
+            return;
+          }
+
+          const canvas = document.createElement('canvas');
+          canvas.width = w; canvas.height = h;
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(img, 0, srcY, srcW, srcH, 0, 0, w, h);
+
+          const imgData = ctx.getImageData(0, 0, w, h);
+          const d = imgData.data;
+          const N = w * h;
+
           for (let i = 0; i < d.length; i += 4) {
-            const v = d[i] > thr ? 255 : 0;
-            d[i] = d[i+1] = d[i+2] = v;
+            let g = 0.299*d[i] + 0.587*d[i+1] + 0.114*d[i+2];
+            g = (g - 128) * contrast + 128;
+            g = Math.max(0, Math.min(255, g));
+            d[i] = d[i+1] = d[i+2] = g;
           }
+
+          if (mode === 'otsu') {
+            const hist = new Array(256).fill(0);
+            for (let i = 0; i < d.length; i += 4) hist[d[i]]++;
+            let total = N, sum = 0;
+            for (let i = 0; i < 256; i++) sum += i * hist[i];
+            let sumB = 0, wB = 0, maxVar = 0, thr = 128;
+            for (let t = 0; t < 256; t++) {
+              wB += hist[t]; if (!wB) continue;
+              const wF = total - wB; if (!wF) break;
+              sumB += t * hist[t];
+              const mB = sumB / wB, mF = (sum - sumB) / wF;
+              const between = wB * wF * (mB - mF) * (mB - mF);
+              if (between > maxVar) { maxVar = between; thr = t; }
+            }
+            for (let i = 0; i < d.length; i += 4) {
+              const v = d[i] > thr ? 255 : 0;
+              d[i] = d[i+1] = d[i+2] = v;
+            }
+          }
+
+          if (bold > 0) boldFilter(imgData, w, h, bold);
+
+          ctx.putImageData(imgData, 0, 0);
+          canvas.toBlob(blob => {
+            if (blob) resolve(blob);
+            else reject(new Error('Не удалось создать изображение'));
+          }, 'image/png');
+        } catch (err) {
+          reject(err);
         }
-
-        if (bold > 0) boldFilter(imgData, w, h, bold);
-
-        ctx.putImageData(imgData, 0, 0);
-        canvas.toBlob(resolve, 'image/png');
       };
-      img.onerror = reject;
+      img.onerror = () => reject(new Error('Не удалось открыть файл изображения'));
       img.src = URL.createObjectURL(file);
     });
   }
 
   async function ocrImage(blob, psm, onProgress, extraParams) {
+    if (!blob) throw new Error('Пустое изображение для OCR');
     const worker = await Tesseract.createWorker('deu', 1, {
       logger: onProgress || (()=>{}),
       errorHandler: e => console.warn('Tesseract:', e)
     });
-    const params = {
-      tessedit_pageseg_mode: String(psm || 6),
-      preserve_interword_spaces: '1'
-    };
-    if (extraParams) Object.assign(params, extraParams);
-    await worker.setParameters(params);
-    const { data } = await worker.recognize(blob);
-    await worker.terminate();
-    return (data && data.text) || '';
+    try {
+      const params = {
+        tessedit_pageseg_mode: String(psm || 6),
+        preserve_interword_spaces: '1'
+      };
+      if (extraParams) Object.assign(params, extraParams);
+      await worker.setParameters(params);
+      const result = await worker.recognize(blob);
+      return (result && result.data && typeof result.data.text === 'string')
+        ? result.data.text
+        : '';
+    } finally {
+      try { await worker.terminate(); } catch(e){}
+    }
   }
 
   // ============================================================
@@ -325,7 +353,7 @@
   async function runOcr(file) {
     if (!file) return;
 
-    const savedName = $('name').value.trim();
+    const savedName = ($('name').value || '').trim();
 
     $('preview').src = URL.createObjectURL(file);
     $('preview').classList.add('active');
@@ -336,97 +364,144 @@
     try {
       const variants = [];
 
-      $('progress').textContent = 'Проход 1/4…';
-      const v1 = await preprocessImage(file, { upscale:2, contrast:1.5, mode:'gray' });
-      variants.push({ name:'full-gray', text: await ocrImage(v1, 6, m => {
-        if (m.status==='recognizing text') $('progress').textContent = 'Проход 1/4… '+Math.round((m.progress||0)*100)+'%';
-      })});
+      // ---- Проход 1 ----
+      try {
+        $('progress').textContent = 'Проход 1/4…';
+        const v1 = await preprocessImage(file, { upscale:2, contrast:1.5, mode:'gray' });
+        const t1 = await ocrImage(v1, 6, m => {
+          if (m.status==='recognizing text') $('progress').textContent = 'Проход 1/4… '+Math.round((m.progress||0)*100)+'%';
+        });
+        variants.push({ name:'full-gray', text: t1 });
+      } catch(e) {
+        console.warn('Проход 1 упал:', e);
+        variants.push({ name:'full-gray', text: '' });
+      }
 
-      $('progress').textContent = 'Проход 2/4 (жирный)…';
-      const v2 = await preprocessImage(file, { upscale:2, contrast:1.7, bold:2, mode:'otsu' });
-      variants.push({ name:'bold-full', text: await ocrImage(v2, 6, m => {
-        if (m.status==='recognizing text') $('progress').textContent = 'Проход 2/4… '+Math.round((m.progress||0)*100)+'%';
-      })});
+      // ---- Проход 2 ----
+      try {
+        $('progress').textContent = 'Проход 2/4 (жирный)…';
+        const v2 = await preprocessImage(file, { upscale:2, contrast:1.7, bold:2, mode:'otsu' });
+        const t2 = await ocrImage(v2, 6, m => {
+          if (m.status==='recognizing text') $('progress').textContent = 'Проход 2/4… '+Math.round((m.progress||0)*100)+'%';
+        });
+        variants.push({ name:'bold-full', text: t2 });
+      } catch(e) {
+        console.warn('Проход 2 упал:', e);
+        variants.push({ name:'bold-full', text: '' });
+      }
 
-      $('progress').textContent = 'Проход 3/4 (цифры вверху)…';
-      const v3blob = await preprocessImage(file, { upscale:5, contrast:1.6, cropFrom:0, cropTo:0.15, mode:'gray' });
-      const v3text = await ocrImage(v3blob, 7, m => {
-        if (m.status==='recognizing text') $('progress').textContent = 'Проход 3/4… '+Math.round((m.progress||0)*100)+'%';
-      }, { tessedit_char_whitelist: '0123456789 ' });
-      variants.push({ name:'topDigits', text: v3text });
+      // ---- Проход 3: цифры вверху ----
+      try {
+        $('progress').textContent = 'Проход 3/4 (цифры вверху)…';
+        const v3blob = await preprocessImage(file, { upscale:5, contrast:1.6, cropFrom:0, cropTo:0.15, mode:'gray' });
+        const v3text = await ocrImage(v3blob, 7, m => {
+          if (m.status==='recognizing text') $('progress').textContent = 'Проход 3/4… '+Math.round((m.progress||0)*100)+'%';
+        }, { tessedit_char_whitelist: '0123456789 ' });
+        variants.push({ name:'topDigits', text: v3text });
+      } catch(e) {
+        console.warn('Проход 3 упал:', e);
+        variants.push({ name:'topDigits', text: '' });
+      }
 
-      $('progress').textContent = 'Проход 4/4 (Name)…';
-      const v4blob = await preprocessImage(file, { upscale:3, contrast:1.7, bold:1, cropFrom:0.1, cropTo:0.4, mode:'otsu' });
-      const v4text = await ocrImage(v4blob, 6, m => {
-        if (m.status==='recognizing text') $('progress').textContent = 'Проход 4/4… '+Math.round((m.progress||0)*100)+'%';
-      });
-      variants.push({ name:'nameStrip', text: v4text });
+      // ---- Проход 4: Name ----
+      try {
+        $('progress').textContent = 'Проход 4/4 (Name)…';
+        const v4blob = await preprocessImage(file, { upscale:3, contrast:1.7, bold:1, cropFrom:0.1, cropTo:0.4, mode:'otsu' });
+        const v4text = await ocrImage(v4blob, 6, m => {
+          if (m.status==='recognizing text') $('progress').textContent = 'Проход 4/4… '+Math.round((m.progress||0)*100)+'%';
+        });
+        variants.push({ name:'nameStrip', text: v4text });
+      } catch(e) {
+        console.warn('Проход 4 упал:', e);
+        variants.push({ name:'nameStrip', text: '' });
+      }
 
+      // ---- Показываем всё ----
       let allText = '';
-      variants.forEach(v => { allText += `\n===== ${v.name} =====\n${v.text}\n`; });
+      variants.forEach(v => { allText += `\n===== ${v.name} =====\n${v.text || '(пусто)'}\n`; });
       $('rawText').value = allText;
       $('rawBox').classList.add('active');
       console.log('=== RAW OCR ===' + allText);
 
+      if (!variants.some(v => v.text && v.text.length > 0)) {
+        toast('OCR не вернул ни одного символа. Попробуйте фото крупнее.', 5000);
+        return;
+      }
+
       const filled = { material:false, name:false, charge:false, gewicht:false };
 
-      // ===== MATERIALNUMMER =====
-      const numFromTop = extract6Digits(v3text);
-      if (numFromTop) {
-        $('material').value = numFromTop;
-        filled.material = true;
-      }
-      if (!filled.material) {
-        for (const v of variants) {
-          const m = extractMaterial(v.text);
-          if (m) { $('material').value = m; filled.material = true; break; }
+      // ---- MATERIALNUMMER ----
+      try {
+        const v3text = (variants.find(v => v.name === 'topDigits') || {}).text || '';
+        const numFromTop = extract6Digits(v3text);
+        if (numFromTop) {
+          $('material').value = numFromTop;
+          filled.material = true;
         }
-      }
-
-      // ===== NAME =====
-      if (savedName) {
-        filled.name = true;
-      } else {
-        for (const v of variants) {
-          const lines = v.text.split('\n').map(s=>s.trim()).filter(Boolean);
-          for (const ln of lines) {
-            if (/[®©Ⓡ]/.test(ln) && ln.replace(/[®©Ⓡ]/g,'').trim().length > 4) {
-              const cleaned = cleanName(ln);
-              if (cleaned) { $('name').value = cleaned; filled.name = true; break; }
-            }
-          }
-          if (filled.name) break;
-        }
-        if (!filled.name) {
-          const brands = /(ELASTOSIL|FLASTOSIL|LASTOSIL|WACKER|SILICONE|TEROSON|LOCTITE|SIKA)/i;
+        if (!filled.material) {
           for (const v of variants) {
+            if (!v.text) continue;
+            const m = extractMaterial(v.text);
+            if (m) { $('material').value = m; filled.material = true; break; }
+          }
+        }
+      } catch(e) { console.warn('Material упал:', e); }
+
+      // ---- NAME ----
+      try {
+        if (savedName) {
+          filled.name = true;
+        } else {
+          for (const v of variants) {
+            if (!v.text) continue;
             const lines = v.text.split('\n').map(s=>s.trim()).filter(Boolean);
             for (const ln of lines) {
-              if (brands.test(ln)) {
+              if (/[®©Ⓡ]/.test(ln) && ln.replace(/[®©Ⓡ]/g,'').trim().length > 4) {
                 const cleaned = cleanName(ln);
                 if (cleaned) { $('name').value = cleaned; filled.name = true; break; }
               }
             }
             if (filled.name) break;
           }
+          if (!filled.name) {
+            const brands = /(ELASTOSIL|FLASTOSIL|LASTOSIL|WACKER|SILICONE|TEROSON|LOCTITE|SIKA)/i;
+            for (const v of variants) {
+              if (!v.text) continue;
+              const lines = v.text.split('\n').map(s=>s.trim()).filter(Boolean);
+              for (const ln of lines) {
+                if (brands.test(ln)) {
+                  const cleaned = cleanName(ln);
+                  if (cleaned) { $('name').value = cleaned; filled.name = true; break; }
+                }
+              }
+              if (filled.name) break;
+            }
+          }
         }
-      }
+      } catch(e) { console.warn('Name упал:', e); }
 
-      // ===== CHARGE =====
-      if (!filled.charge) {
-        const charge = extractCharge(variants.map(v=>v.text).join('\n'));
-        if (charge) { $('charge').value = charge; filled.charge = true; }
-      }
+      // ---- CHARGE ----
+      try {
+        if (!filled.charge) {
+          const joined = variants.map(v => v.text || '').join('\n');
+          const charge = extractCharge(joined);
+          if (charge) { $('charge').value = charge; filled.charge = true; }
+        }
+      } catch(e) { console.warn('Charge упал:', e); }
 
-      // ===== GEWICHT =====
-      if (!filled.gewicht) {
-        const gew = extractGewicht(variants.map(v=>v.text).join('\n'));
-        if (gew) { $('gewicht').value = gew; filled.gewicht = true; }
-      }
+      // ---- GEWICHT ----
+      try {
+        if (!filled.gewicht) {
+          const joined = variants.map(v => v.text || '').join('\n');
+          const gew = extractGewicht(joined);
+          if (gew) { $('gewicht').value = gew; filled.gewicht = true; }
+        }
+      } catch(e) { console.warn('Gewicht упал:', e); }
 
       const count = Object.values(filled).filter(Boolean).length;
       if (count === 0) toast('Не распознано — попробуйте фото лучше', 4000);
       else toast('Заполнено полей: ' + count + ' ✓');
+
     } catch (e) {
       console.error(e);
       alert('Ошибка OCR: ' + (e.message || e));
@@ -451,15 +526,22 @@
   });
 
   // ============================================================
-  //  ИЗВЛЕЧЕНИЕ ПОЛЕЙ
+  //  ИЗВЛЕЧЕНИЕ ПОЛЕЙ (все с защитой)
   // ============================================================
+  function safeText(t) {
+    return (typeof t === 'string') ? t : '';
+  }
+
   function extract6Digits(text) {
+    text = safeText(text);
     if (!text) return '';
     const m = text.match(/(?:^|\D)(\d{6})(?!\d)/);
     return m ? m[1] : '';
   }
 
   function extractMaterial(text) {
+    text = safeText(text);
+    if (!text) return '';
     const lines = text.split('\n').map(s => s.trim()).filter(Boolean);
     const packRe = /P\s*[AА]\s*C\s*[KК]\s*[\s\-_\.]*S\s*T\s*[UÜUО]\s*C\s*[KК]/i;
 
@@ -488,12 +570,12 @@
       if (m) return m[0];
     }
     const beforeCharge = text.split(/CHARGEN?/i)[0];
-    const m = beforeCharge.match(/\b\d{6}\b/);
+    const m = (beforeCharge || '').match(/\b\d{6}\b/);
     return m ? m[0] : '';
   }
 
-  // ===== ОЧИСТКА NAME =====
   function cleanName(raw) {
+    raw = safeText(raw);
     if (!raw) return '';
 
     let s = raw
@@ -502,19 +584,14 @@
       .trim()
       .toUpperCase();
 
-    // ШАГ 1: обрезаем всё до бренда
     const brandMatch = s.match(/(ELASTOSIL|FLASTOSIL|LASTOSIL|WACKER|SILICONE|TEROSON|LOCTITE|SIKA|DOW|HENKEL|MOMENTIVE)/);
     if (brandMatch) s = s.substring(brandMatch.index);
     else s = s.replace(/^[^A-ZА-Я]*/, '');
 
-    // ШАГ 2: НОРМАЛИЗАЦИЯ БРЕНДА (ключевой фикс!)
-    // FLASTOSIL, LASTOSIL, ELASTOSI и т.п. → ELASTOSIL
     s = s.replace(/^F?LA?STOSIL/, 'ELASTOSIL');
     s = s.replace(/^ELASTOSI(?!L)/, 'ELASTOSIL');
-    // Если бренд вообще не распознан, но начинается на "ASTOSIL" — добавим E
     s = s.replace(/^ASTOSIL/, 'ELASTOSIL');
 
-    // ШАГ 3: обрезаем мусор после модели
     const modelMatch = s.match(/^(ELASTOSIL\s+M\s*\d{2,4}\s*[A-ZА-Я]?)/);
     if (modelMatch) {
       s = modelMatch[1].trim();
@@ -523,8 +600,6 @@
       if (m2 && m2[1].length >= 6) s = m2[1].trim();
     }
 
-    // ШАГ 4: СПРАВОЧНИК ИЗВЕСТНЫХ ПРОДУКТОВ
-    // Теперь s гарантированно начинается с ELASTOSIL
     const KNOWN = [
       { pattern: /ELASTOSIL\s*M\s*46/i,   canonical: 'ELASTOSIL M 4601 A' },
       { pattern: /ELASTOSIL\s*M\s*4601/i, canonical: 'ELASTOSIL M 4601 A' },
@@ -539,8 +614,9 @@
     return s;
   }
 
-  // ===== CHARGE =====
   function extractCharge(text) {
+    text = safeText(text);
+    if (!text) return '';
     const lines = text.split('\n');
     for (const ln of lines) {
       if (/CHARGEN/i.test(ln)) {
@@ -557,8 +633,9 @@
     return '';
   }
 
-  // ===== GEWICHT =====
   function extractGewicht(text) {
+    text = safeText(text);
+    if (!text) return '';
     const up = text.toUpperCase();
     let g = '';
 
